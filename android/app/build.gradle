@@ -37,10 +37,12 @@ android {
         // 与旧版 debug 证书不同 —— 首次升级到该签名需要先卸载旧版。
         // 密钥库随仓库分发(公开信息, 适合侧载; 上架商店前再换专用发布密钥)。
         remote {
-            storeFile file('keystore/dsh-remote-release.keystore')
-            storePassword 'dshremote'
-            keyAlias 'dshremote'
-            keyPassword 'dshremote'
+            // 默认用专用发布证书；可用环境变量临时换成其它密钥库（例如发布修复版前
+            // 用旧 debug 证书签一个「可覆盖安装」的过渡包，让用户先导出配置）。
+            storeFile file(System.getenv('DSH_REMOTE_KEYSTORE') ?: 'keystore/dsh-remote-release.keystore')
+            storePassword System.getenv('DSH_REMOTE_KEYSTORE_PASS') ?: 'dshremote'
+            keyAlias System.getenv('DSH_REMOTE_KEY_ALIAS') ?: 'dshremote'
+            keyPassword System.getenv('DSH_REMOTE_KEY_PASS') ?: 'dshremote'
             enableV1Signing true
             enableV2Signing true
             enableV3Signing true

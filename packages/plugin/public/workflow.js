@@ -188,8 +188,19 @@
     voiceText.append(voiceName,voiceDesc)
     voiceEntry.append(voiceMark,voiceText)
     voiceEntry.addEventListener('click',()=>{root.DshVoiceInput?.openSettings?.()})
+    // 配置备份：换机/换签名卸载重装前导出，装好后导入
+    const backupEntry=element('button','setting-row setting-link'),backupText=element('div')
+    const backupName=element('div','setting-name'),backupDesc=element('div','setting-desc')
+    backupEntry.type='button';backupEntry.id='btn-config-transfer';backupEntry.dataset.settingsGroup='config'
+    backupName.dataset.i18n='config.entry';backupName.textContent=root.I18N?.t?.('config.entry')||'配置备份'
+    backupDesc.dataset.i18n='config.entryDesc';backupDesc.textContent=root.I18N?.t?.('config.entryDesc')||'导出/导入服务器、偏好与主题'
+    const backupMark=element('span','workflow-setting-icon');backupMark.append(icon('about'))
+    backupText.append(backupName,backupDesc)
+    backupEntry.append(backupMark,backupText)
+    backupEntry.addEventListener('click',()=>{root.DshConfigTransfer?.open?.()})
     const generalRow=preferenceList.querySelector('[data-settings-group="general"]')
     if(generalRow)generalRow.after(voiceEntry);else preferenceList.prepend(voiceEntry)
+    if(voiceEntry.parentNode)voiceEntry.after(backupEntry);else preferenceList.append(backupEntry)
     home.querySelector('[data-settings-group="tests"]')?.remove()
     home.querySelector('[data-settings-group="theme"]')?.remove()
     const general=$('settings-page-general'),theme=$('settings-page-theme')

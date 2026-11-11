@@ -1525,3 +1525,13 @@ body.in-session #session-sub { min-height:32px; padding:4px 2px; }
   .main { max-width: 1320px; }
   .composer-wrap { max-width: 1320px; }
 }
+/* 配置备份弹层：导出/导入本机设置（换机或换签名重装前使用） */
+.config-transfer { position: fixed; inset: 0; z-index: 56; display: grid; place-items: center; padding: 16px; background: rgba(0,0,0,.45); }
+.config-transfer.hidden { display: none; }
+.config-transfer-panel { width: min(560px, 100%); max-height: 86vh; display: flex; flex-direction: column; gap: 9px; padding: 14px; border-radius: 14px; background: var(--dsr-bg-2); border: 1px solid var(--dsr-line); box-shadow: 0 18px 40px var(--dsr-shadow); }
+.config-transfer-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; }
+.config-transfer-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsr-muted); }
+.config-transfer-text { min-height: 180px; max-height: 42vh; resize: vertical; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--dsr-line); background: var(--dsr-panel); color: var(--dsr-text); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.config-transfer-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.config-transfer-actions .mini-btn { cursor: pointer; }
+.config-transfer-status { min-height: 16px; font-size: 12px; color: var(--dsr-muted); }
