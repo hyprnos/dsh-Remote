@@ -639,3 +639,15 @@ test('弹层内「下载并准备」复用现有 prepare 轮询，可取消', as
   assert.equal(JSON.stringify(h.calls.filter(call => call.method === 'speech.cancelPreparation').map(call => call.payload)), '[{"providerId":"p1"}]')
   assert.equal(byElementId(overlay, 'voice-settings-prepare').textContent, 'voice.model.prepare')
 })
+
+
+test('录音中发送：stopAndTranscribe 导出且未录音时立即返回 skipped', async () => {
+  const voiceSource = fs.readFileSync(path.join(__dirname, '../public/voice-input.js'), 'utf8')
+  assert.match(voiceSource, /function isRecording\(\)/)
+  assert.match(voiceSource, /function stopAndTranscribe\(\)/)
+  assert.match(voiceSource, /isRecording, stopAndTranscribe,/)
+  assert.match(voiceSource, /sendWaiter = resolve/)
+  const appSource = fs.readFileSync(path.join(__dirname, '../public', 'app.js'), 'utf8')
+  assert.match(appSource, /voice\?\.isRecording\?\.\(\)/)
+  assert.match(appSource, /await voice\.stopAndTranscribe\(\)/)
+})

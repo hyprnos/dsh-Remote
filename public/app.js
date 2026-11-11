@@ -3320,6 +3320,38 @@ function safeJson(v) {
 function truncate(s, n) { return String(s).length > n ? String(s).slice(0, n) + t('truncated') : s }
 
 /* 会话卡片(goal/todo/subagents); 统计进顶栏 📊 弹窗 */
+
+/* >>> 用量统计纯函数区：tests/usage-stats.test.js 直接切片执行，勿依赖 DOM */
+// 每轮用量只统计「已加载的历史」：assistant/message 的 data.usage + data.turn。
+function collectTurnUsage(entries) {
+  const byTurn = new Map()
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const event = entry && entry.event ? entry.event : entry
+    if (!event || event.type !== 'assistant/message') continue
+    const usage = event.data && event.data.usage
+    const turn = Number(event.data && event.data.turn)
+    if (!usage || !Number.isFinite(turn) || turn <= 0) continue
+    const row = byTurn.get(turn) || { turn, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, steps: 0 }
+    row.input += Number(usage.inputTokens) || 0
+    row.output += Number(usage.outputTokens) || 0
+    row.cacheRead += Number(usage.cacheReadTokens) || 0
+    row.cacheWrite += Number(usage.cacheWriteTokens) || 0
+    row.steps += 1
+    byTurn.set(turn, row)
+  }
+  return [...byTurn.values()].sort((a, b) => a.turn - b.turn)
+}
+function usageTotals(rows) {
+  const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 }
+  for (const row of Array.isArray(rows) ? rows : []) {
+    total.input += row.input; total.output += row.output
+    total.cacheRead += row.cacheRead; total.cacheWrite += row.cacheWrite
+    total.turns += 1
+  }
+  return total
+}
+/* <<< 用量统计纯函数区 */
+
 function statsHtml(s) {
   const stats = proj(s, 'sessionStats')
   const usage = proj(s, 'tokenUsage')
@@ -3335,6 +3367,27 @@ function statsHtml(s) {
       ${ctx ? `<div class="card-row"><span class="k">${t('stats.ctxPressure')}</span><span class="v">${fmtTokens(ctx.pressureTokens)} / ${fmtTokens(ctx.contextWindow)}</span></div>` : ''}
       ${perms?.currentValue ? `<div class="card-row"><span class="k">${t('stats.permission')}</span><span class="v">${esc(perms.currentValue)}</span></div>` : ''}
     </div>`
+  }
+  // 会话累计（主机投影，权威）+ 每轮明细（仅已加载历史，明确标注范围，避免当成全量）
+  if (usage) {
+    const sum = (usage.uncachedInputTokens || 0) + (usage.outputTokens || 0) + (usage.cacheReadTokens || 0) + (usage.cacheWriteTokens || 0)
+    html += `<div class="card"><div class="card-title">${t('stats.sessionUsageTitle')}</div>
+      <div class="card-row"><span class="k">${t('stats.inUncached')}</span><span class="v">${fmtTokens(usage.uncachedInputTokens)}</span></div>
+      <div class="card-row"><span class="k">${t('stats.outTokens')}</span><span class="v">${fmtTokens(usage.outputTokens)}</span></div>
+      <div class="card-row"><span class="k">${t('stats.cacheReadTokens')}</span><span class="v">${fmtTokens(usage.cacheReadTokens)}</span></div>
+      <div class="card-row"><span class="k">${t('stats.cacheWriteTokens')}</span><span class="v">${fmtTokens(usage.cacheWriteTokens)}</span></div>
+      <div class="card-row"><span class="k">${t('stats.totalTokens')}</span><span class="v">${fmtTokens(sum)}</span></div>
+    </div>`
+  }
+  const turnRows = collectTurnUsage(state.history?.visible)
+  if (turnRows.length) {
+    const perTurn = usageTotals(turnRows)
+    html += `<div class="card"><div class="card-title">${t('stats.perTurnTitle')}</div>`
+    html += `<div class="card-row"><span class="k">${t('stats.perTurnRange', { turns: turnRows.length })}</span><span class="v">${fmtTokens(perTurn.input + perTurn.output + perTurn.cacheRead + perTurn.cacheWrite)}</span></div>`
+    for (const row of turnRows.slice(-12).reverse()) {
+      html += `<div class="card-row"><span class="k">${t('stats.turnLabel', { turn: row.turn })}</span><span class="v">${fmtTokens(row.input)} / ${fmtTokens(row.output)} / ${fmtTokens(row.cacheRead)}</span></div>`
+    }
+    html += `<div class="card-note">${t('stats.perTurnHint')}</div></div>`
   }
   return html || '<div class="empty">' + t('stats.empty') + '</div>'
 }
@@ -3913,6 +3966,12 @@ async function encodeComposerImagesFor(images) {
 }
 
 async function sendMessage(requestedMode) {
+  // 录音中直接点发送：先自动停录并转写（纠错后插入草稿），再走原有发送流程，不必手动停录。
+  const voice = window.DshVoiceInput
+  if (voice?.isRecording?.()) {
+    const outcome = await voice.stopAndTranscribe()
+    if (!outcome || outcome.ok !== true) return
+  }
   const input = $('composer-input')
   const originalText = input.value
   const text = originalText.trim()

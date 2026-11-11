@@ -201,6 +201,13 @@
   let settingsError = ''
   let settingsStamp = 0
   const ABORTED = { voiceAbort: true }
+  // 「录音中直接点发送」时由 sendMessage 等待转写结果；正常停录不设 waiter。
+  let sendWaiter = null
+  function settleSend(outcome) {
+    const resolver = sendWaiter
+    sendWaiter = null
+    if (resolver) resolver(outcome)
+  }
 
   function t(key, vars) {
     if (host && typeof host.t === 'function') return host.t(key, vars)
@@ -522,7 +529,7 @@
   }
 
   function abortRecording() {
-    if (!session) return
+    if (!session) { settleSend({ ok: false, discarded: true }); return }
     const current = session
     session = null
     if (current.timer) root.clearInterval(current.timer)
@@ -538,12 +545,13 @@
     releaseStream(current.stream)
     mode = current.discard ? 'idle' : 'transcribing'
     renderMic()
-    if (current.discard) { hideBar(); return }
+    if (current.discard) { hideBar(); settleSend({ ok: false, discarded: true }); return }
     if (current.failed) {
       mode = 'idle'
       renderMic()
       hideBar()
       toast(t('voice.failed', { msg: messageOf(current.failed) }), 'err')
+      settleSend({ ok: false, reason: 'failed' })
       return
     }
     const blob = current.chunks.length ? new Blob(current.chunks, { type: (current.recorder && current.recorder.mimeType) || '' }) : null
@@ -552,6 +560,7 @@
       renderMic()
       hideBar()
       toast(t('voice.empty'), 'err')
+      settleSend({ ok: false, reason: 'empty' })
       return
     }
     const connectionAtStart = connectionId()
@@ -563,11 +572,13 @@
       renderMic()
       // 换过服务器/令牌时旧请求的结果与错误都不再适用
       if (error !== ABORTED && connectionId() === connectionAtStart) handleTranscribeError(error)
+      settleSend({ ok: false, reason: 'transcribe' })
       return
     }
     hideBar()
     mode = 'idle'
     renderMic()
+    settleSend({ ok: true })
   }
 
   function connectionId() {
@@ -1145,7 +1156,17 @@
     void probeCatalog()
   }
 
-  const api = { encodeWav, toBase64, decodeBase64, shouldShowMic, insertAtCursor, mount, reset, openSettings, closeSettings }
+  function isRecording() { return mode === 'recording' && !!session }
+
+  // 录音中直接点发送：停止录音→转写→纠错→插入草稿，resolve 后由调用方继续发送。
+  function stopAndTranscribe() {
+    if (!isRecording()) return Promise.resolve({ ok: true, skipped: true })
+    const pending = new Promise(resolve => { sendWaiter = resolve })
+    stopRecording(false)
+    return pending
+  }
+
+  const api = { encodeWav, toBase64, decodeBase64, shouldShowMic, insertAtCursor, isRecording, stopAndTranscribe, mount, reset, openSettings, closeSettings }
   if (typeof module !== 'undefined' && module.exports) module.exports = api
   else root.DshVoiceInput = api
 })(typeof window === 'undefined' ? globalThis : window)
