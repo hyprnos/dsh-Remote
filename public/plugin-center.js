@@ -87,7 +87,7 @@ window.DshPluginCenter = (() => {
     return el
   }
   const experimentalPlugin = item => item.name?.startsWith('@deepseek-ai/dsh-experimental-') === true
-  const installedPlugin = item => item.managed || item.name === 'dsh-remote-plugin' || experimentalPlugin(item)
+  const installedPlugin = item => item.managed || item.name === '@hyprnos/dsh-remote-plugin' || experimentalPlugin(item)
   function renderInstalled() {
     const list = dialog.querySelector('.pc-list'), restore = preserveListPosition(list)
     experimentalExpanded = list.querySelector('.pc-experimental')?.open ?? experimentalExpanded
@@ -457,7 +457,7 @@ window.DshPluginCenter = (() => {
       await refresh()
       if (!valid()) return
       if (snapshot.revision !== revision || snapshot.busy) throw new Error('检查期间插件列表或任务状态已变化，请重新检查')
-      targets.sort((a, b) => (a.name === 'dsh-remote-plugin') - (b.name === 'dsh-remote-plugin') || a.name.localeCompare(b.name))
+      targets.sort((a, b) => (a.name === '@hyprnos/dsh-remote-plugin') - (b.name === '@hyprnos/dsh-remote-plugin') || a.name.localeCompare(b.name))
       pending = false; updateAllControl()
       if (!targets.length) {
         area.replaceChildren(node('p', '没有可自动更新的插件。'))
@@ -479,8 +479,8 @@ window.DshPluginCenter = (() => {
     const id = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
     const body = { id, action, name, ...(version ? { version } : {}), revision: snapshot.revision }
     if (batch) body.targets = batch.targets
-    if (name === 'dsh-remote-plugin' && action === 'update') body.confirmSelfUpdate = true
-    if (batch?.targets.some(target => target.name === 'dsh-remote-plugin')) body.confirmSelfUpdate = true
+    if (name === '@hyprnos/dsh-remote-plugin' && action === 'update') body.confirmSelfUpdate = true
+    if (batch?.targets.some(target => target.name === '@hyprnos/dsh-remote-plugin')) body.confirmSelfUpdate = true
     const area = dialog.querySelector('.pc-detail')
     let plan
     if (['install', 'update', 'remove', 'update-all'].includes(action)) {

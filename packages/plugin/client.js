@@ -3,7 +3,7 @@
  * 产物入库, 无构建步骤; 参考 @openbiliclaw/dsh-plugin 的官方 slot 注册模式。
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-remote-plugin',
+  id: '@hyprnos/dsh-remote-plugin',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports

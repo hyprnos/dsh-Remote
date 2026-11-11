@@ -64,10 +64,10 @@ async function waitFor(check, timeoutMs, message) {
 for (const listenHost of ['0.0.0.0', '::']) {
 test(`插件自启：${listenHost} 上游认证、HTTP 和 WS 使用回环地址`, async (t) => {
   const connectHost = listenHost === '::' ? '::1' : '127.0.0.1'
-  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-remote-plugin-autostart-'))
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-remote-autostart-'))
   const emptyBin = path.join(tmpHome, 'empty-bin')
   const configDir = path.join(tmpHome, '.dsh-remote')
-  const pluginDir = path.join(tmpHome, 'install', 'node_modules', 'dsh-remote-plugin')
+  const pluginDir = path.join(tmpHome, 'install', 'node_modules', '@hyprnos/dsh-remote-plugin')
   fs.cpSync(path.dirname(PLUGIN), pluginDir, { recursive: true })
   fs.mkdirSync(emptyBin, { recursive: true })
   fs.mkdirSync(configDir, { recursive: true })

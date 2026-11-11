@@ -17,7 +17,7 @@ function loadFactory() {
     },
   }
   vm.runInNewContext(fs.readFileSync(CLIENT, 'utf8'), { window, Symbol })
-  assert.equal(registration?.id, 'dsh-remote-plugin')
+  assert.equal(registration?.id, '@hyprnos/dsh-remote-plugin')
   return registration.factory
 }
 

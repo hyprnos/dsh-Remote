@@ -39,6 +39,10 @@ let fakeUpstreamPort = 0
 const fakeSockets = new Set()
 let fakeUpgradeCount = 0
 let fakeAnnouncementsStatus = 200
+// 语音实验 bundle 的宿主侧状态：'missing' 时 speech/* 整族返回 404（等同未启用该 bundle）。
+let fakeSpeechMode = 'enabled'
+let fakeSpeechDelayMs = 0
+const fakeSpeechCalls = []
 let fakeFeedbackPayload = null
 let fakeModernCreatePayload = null
 let fakeWorkspaceRoots = []
@@ -239,6 +243,42 @@ function startFakeUpstream(listenPort = 0) {
         res.end()
         return
       }
+      // 语音：模拟官方实验 bundle 的 generated RPC（speech/<verb>）。请求形状与
+      // callUpstreamRemote 一致：method 是斜杠 endpoint，参数在 payload.args。
+      if (req.url.startsWith('/api/speech/') && req.method === 'POST') {
+        let raw = ''
+        req.on('data', chunk => { raw += chunk })
+        req.on('end', () => {
+          let body = {}
+          try { body = JSON.parse(raw || '{}') } catch {}
+          fakeSpeechCalls.push({ endpoint: req.url.slice('/api/'.length), method: body.method, args: body.payload?.args, cookie: req.headers.cookie || '' })
+          if (fakeSpeechMode !== 'enabled') {
+            res.writeHead(404)
+            res.end()
+            return
+          }
+          const value = req.url === '/api/speech/transcribe'
+            ? { text: '你好世界', audioSeconds: 2.5, inferenceSeconds: 0.4 }
+            : req.url === '/api/speech/catalog'
+              ? {
+                maxAudioBytes: 4 * 1024 * 1024,
+                maxDurationSeconds: 120,
+                providers: [{ id: 'sensevoice', name: 'SenseVoice', location: 'host-local', languages: ['zh'], preparation: { phase: 'ready' } }],
+                selection: { providerId: 'sensevoice', language: 'zh' },
+              }
+              : {}
+          const out = JSON.stringify({ type: 'server-response', rpcId: body.rpcId, result: { ok: true, value } })
+          const reply = () => {
+            if (res.destroyed) return
+            res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(out) })
+            res.end(out)
+          }
+          if (fakeSpeechDelayMs > 0) setTimeout(reply, fakeSpeechDelayMs)
+          else reply()
+        })
+        return
+      }
+      req.resume()
       res.writeHead(404)
       res.end()
     })
@@ -1691,6 +1731,237 @@ test('WebSocket 升级失败：上游非 101 时及时返回错误而不是挂�
     assert.match(String(response), /^HTTP\/1\.1 401 Unauthorized/)
   } finally {
     sock.destroy()
+  }
+})
+
+test('speech.catalog 转发：点号方法名映射为 speech/catalog，使用宿主 Cookie 且参数为空对象', async () => {
+  fakeSpeechCalls.length = 0
+  const response = await fetch(`${base}/api/speech.catalog`, {
+    method: 'POST',
+    headers: authHeaders({ 'content-type': 'application/json', cookie: 'untrusted-client=cookie' }),
+    body: JSON.stringify({ type: 'client-request', rpcId: 'speech-catalog', method: 'speech.catalog', payload: {} }),
+  })
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.rpcId, 'speech-catalog')
+  assert.equal(body.result.ok, true)
+  assert.equal(body.result.value.selection.providerId, 'sensevoice')
+  const forwarded = fakeSpeechCalls.filter(call => call.endpoint === 'speech/catalog')
+  assert.equal(forwarded.length, 1)
+  assert.equal(forwarded[0].method, 'speech/catalog')
+  assert.deepEqual(forwarded[0].args, {})
+  assert.equal(forwarded[0].cookie, DSH_COOKIE)
+})
+
+test('speech.transcribe：4.5 MiB 录音可通过（>4 MiB），>8 MiB 返回 413 并报告真实上限', async () => {
+  fakeSpeechCalls.length = 0
+  const audio = 'A'.repeat(4 * 1024 * 1024 + 512 * 1024)
+  let response = await fetch(`${base}/api/speech.transcribe`, {
+    method: 'POST',
+    headers: authHeaders({ 'content-type': 'application/json' }),
+    body: JSON.stringify({
+      type: 'client-request', rpcId: 'speech-transcribe',
+      method: 'speech.transcribe',
+      payload: { request: { audioBase64: audio, providerId: 'sensevoice', language: 'zh' } },
+    }),
+  })
+  assert.equal(response.status, 200)
+  let body = await response.json()
+  assert.equal(body.result.ok, true)
+  assert.equal(body.result.value.text, '你好世界')
+  const forwarded = fakeSpeechCalls.find(call => call.endpoint === 'speech/transcribe')
+  assert.ok(forwarded, '转写必须落到 speech/transcribe')
+  assert.equal(forwarded.method, 'speech/transcribe')
+  assert.equal(forwarded.args.request.audioBase64.length, audio.length)
+  assert.equal(forwarded.args.request.language, 'zh')
+
+  response = await fetch(`${base}/api/speech.transcribe`, {
+    method: 'POST',
+    headers: authHeaders({ 'content-type': 'application/json' }),
+    body: JSON.stringify({
+      type: 'client-request', rpcId: 'speech-transcribe-large',
+      method: 'speech.transcribe',
+      payload: { request: { audioBase64: 'A'.repeat(8 * 1024 * 1024) } },
+    }),
+  })
+  assert.equal(response.status, 413)
+  body = await response.json()
+  assert.equal(body.error, 'body-too-large')
+  assert.equal(body.max, 8 * 1024 * 1024)
+
+  // 放宽只针对 transcribe：普通 RPC 仍按 4 MiB 拒绝，且 max 报告 4 MiB。
+  response = await fetch(`${base}/api/workspace.list`, {
+    method: 'POST',
+    headers: authHeaders({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ type: 'client-request', rpcId: 'workspace-padding', method: 'workspace.list', payload: { padding: 'x'.repeat(5 * 1024 * 1024) } }),
+  })
+  assert.equal(response.status, 413)
+  body = await response.json()
+  assert.equal(body.error, 'body-too-large')
+  assert.equal(body.max, 4 * 1024 * 1024)
+})
+
+test('speech.prepare / cancelPreparation / configure：参数按上游契约展开', async () => {
+  fakeSpeechCalls.length = 0
+  const call = async (method, payload) => {
+    const response = await fetch(`${base}/api/${method}`, {
+      method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ type: 'client-request', rpcId: 'rpc-' + method, method, payload }),
+    })
+    assert.equal(response.status, 200, method)
+    return response.json()
+  }
+  const options = { downloadSource: 'https://example.test/model' }
+  assert.equal((await call('speech.prepare', { providerId: 'sensevoice', options })).result.ok, true)
+  assert.deepEqual(fakeSpeechCalls.find(call => call.endpoint === 'speech/prepare').args, { providerId: 'sensevoice', options })
+  assert.equal((await call('speech.cancelPreparation', { providerId: 'sensevoice' })).result.ok, true)
+  assert.deepEqual(fakeSpeechCalls.find(call => call.endpoint === 'speech/cancelPreparation').args, { providerId: 'sensevoice' })
+  assert.equal((await call('speech.configure', { providerId: 'sensevoice', language: 'en' })).result.ok, true)
+  assert.deepEqual(fakeSpeechCalls.find(call => call.endpoint === 'speech/configure').args, { patch: { providerId: 'sensevoice', language: 'en' } })
+})
+
+test('speech 上游 404（bundle 未启用）返回 speech/unavailable 信封而不是 502', async () => {
+  fakeSpeechMode = 'missing'
+  try {
+    const response = await fetch(`${base}/api/speech.catalog`, {
+      method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ type: 'client-request', rpcId: 'speech-missing', method: 'speech.catalog', payload: {} }),
+    })
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.rpcId, 'speech-missing')
+    assert.equal(body.result.ok, false)
+    assert.equal(body.result.error.code, 'speech/unavailable')
+    assert.match(body.result.error.message, /语音/)
+    assert.equal(body.result.error.details.method, 'speech.catalog')
+
+    const transcribe = await fetch(`${base}/api/speech.transcribe`, {
+      method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ type: 'client-request', rpcId: 'speech-missing-transcribe', method: 'speech.transcribe', payload: { request: { audioBase64: 'AAAA' } } }),
+    })
+    assert.equal(transcribe.status, 200)
+    assert.equal((await transcribe.json()).result.error.code, 'speech/unavailable')
+  } finally {
+    fakeSpeechMode = 'enabled'
+  }
+})
+
+test('legacy 上游（无 speech）优雅降级：返回 speech/unavailable 且不被误判为 modern', async () => {
+  fakeSpeechMode = 'missing'
+  const legacyPort = await getFreePort()
+  const legacyBase = `http://127.0.0.1:${legacyPort}`
+  const legacyChild = spawn(process.execPath, [GATEWAY], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      HOME: tmpRoot,
+      USERPROFILE: tmpRoot,
+      PORT: String(legacyPort),
+      HOST: '127.0.0.1',
+      DSH_UPSTREAM: `http://127.0.0.1:${fakeUpstreamPort}`,
+      TOKEN,
+      TOKEN_FILE: path.join(tmpRoot, 'token'),
+      DSH_REMOTE_FS_ROOT: tmpRoot,
+      DSH_REMOTE_NOTES: path.join(tmpRoot, 'notes.json'),
+      DSH_REMOTE_ANNOUNCEMENTS_URL: '',
+      UPDATE_CHECK_URL: 'http://127.0.0.1:1/update',
+      UPDATE_INTERVAL_MS: '3600000',
+      UPDATE_PROXY: '',
+      HTTP_PROXY: '',
+      HTTPS_PROXY: '',
+      ALL_PROXY: '',
+      NO_PROXY: '*'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  legacyChild.stdout.on('data', () => {})
+  legacyChild.stderr.on('data', () => {})
+  try {
+    await waitForHealth(legacyBase, 10000)
+    const response = await fetch(`${legacyBase}/api/speech.catalog`, {
+      method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ type: 'client-request', rpcId: 'legacy-speech', method: 'speech.catalog', payload: {} }),
+    })
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.result.ok, false)
+    assert.equal(body.result.error.code, 'speech/unavailable')
+
+    // 老宿主不能因为新增的 speech.* 方法被误标成 modern：协议切换会让事件双流用错契约。
+    const diagnostics = await (await fetch(`${legacyBase}/diagnostics`, { headers: authHeaders() })).json()
+    assert.equal(diagnostics.upstream.apiFlavor, 'legacy')
+    assert.equal((await fetch(`${legacyBase}/health`)).status, 200)
+  } finally {
+    if (legacyChild.exitCode === null) legacyChild.kill('SIGTERM')
+    await Promise.race([
+      once(legacyChild, 'exit').then(() => {}),
+      new Promise((r) => setTimeout(r, 2000))
+    ])
+    fakeSpeechMode = 'enabled'
+  }
+})
+
+test('speech.transcribe 拥有独立 180s 上游预算：慢转写不被普通 RPC 超时切断', async () => {
+  const slowPort = await getFreePort()
+  const slowBase = `http://127.0.0.1:${slowPort}`
+  const slowChild = spawn(process.execPath, [GATEWAY], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      HOME: tmpRoot,
+      USERPROFILE: tmpRoot,
+      PORT: String(slowPort),
+      HOST: '127.0.0.1',
+      DSH_UPSTREAM: `http://127.0.0.1:${fakeUpstreamPort}`,
+      TOKEN,
+      TOKEN_FILE: path.join(tmpRoot, 'token'),
+      DSH_REMOTE_FS_ROOT: tmpRoot,
+      DSH_REMOTE_NOTES: path.join(tmpRoot, 'notes.json'),
+      DSH_REMOTE_ANNOUNCEMENTS_URL: '',
+      // 普通 RPC 的上游超时压到最小 1s，用来证明 transcribe 不吃这个预算。
+      GATEWAY_UPSTREAM_TIMEOUT_MS: '1000',
+      UPDATE_CHECK_URL: 'http://127.0.0.1:1/update',
+      UPDATE_INTERVAL_MS: '3600000',
+      UPDATE_PROXY: '',
+      HTTP_PROXY: '',
+      HTTPS_PROXY: '',
+      ALL_PROXY: '',
+      NO_PROXY: '*'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  slowChild.stdout.on('data', () => {})
+  slowChild.stderr.on('data', () => {})
+  fakeSpeechDelayMs = 1500
+  try {
+    await waitForHealth(slowBase, 10000)
+    const call = method => fetch(`${slowBase}/api/${method}`, {
+      method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ type: 'client-request', rpcId: 'slow-' + method, method, payload: method === 'speech.transcribe' ? { request: { audioBase64: 'AAAA' } } : {} }),
+    })
+    let response = await call('speech.catalog')
+    assert.equal(response.status, 200)
+    let body = await response.json()
+    assert.equal(body.result.ok, false)
+    assert.equal(body.result.error.code, 'speech/timeout')
+
+    response = await call('speech.transcribe')
+    assert.equal(response.status, 200)
+    body = await response.json()
+    assert.equal(body.result.ok, true)
+    assert.equal(body.result.value.text, '你好世界')
+  } finally {
+    fakeSpeechDelayMs = 0
+    if (slowChild.exitCode === null) slowChild.kill('SIGTERM')
+    await Promise.race([
+      once(slowChild, 'exit').then(() => {}),
+      new Promise((r) => setTimeout(r, 2000))
+    ])
   }
 })
 

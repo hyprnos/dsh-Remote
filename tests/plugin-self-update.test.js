@@ -5,10 +5,10 @@ const { spawn } = require('node:child_process'), { once } = require('node:events
 const { getFreePort } = require('./fixtures/realistic-stack.cjs')
 const ROOT = path.join(__dirname, '..'), TOKEN = 'isolated-remote-self-update-token'
 const VERSION = require('../package.json').version, TARGET = '99.0.0-selftest.1'
-const NAME = 'dsh-remote-plugin', ID = 'remote-self-update-12345678'
+const NAME = '@hyprnos/dsh-remote-plugin', ID = 'remote-self-update-12345678'
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 function lock(version) {
-  return `lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      dsh-remote-plugin:\n        specifier: ${version}\n        version: ${version}\npackages:\n  'dsh-remote-plugin@${version}': {}\n`
+  return `lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      @hyprnos/dsh-remote-plugin:\n        specifier: ${version}\n        version: ${version}\npackages:\n  '@hyprnos/dsh-remote-plugin@${version}': {}\n`
 }
 async function until(check, message) {
   let last

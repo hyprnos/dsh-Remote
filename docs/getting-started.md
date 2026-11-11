@@ -6,7 +6,7 @@
 
 | 场景 | 方式 |
 | --- | --- |
-| 已使用 DSH Web | 安装 `dsh-remote-plugin`，由插件管理内置网关 |
+| 已使用 DSH Web | 安装 `@hyprnos/dsh-remote-plugin`，由插件管理内置网关 |
 | 使用 DSH Desktop | 从桌面版自带插件管理入口安装 Remote，再完整退出并重开 Desktop |
 | 需要单独管理网关 | 下载 Windows/Linux/macOS（Apple Silicon）单文件网关，或从仓库运行 `node gateway.js --supervise` |
 | 手机访问 | Android APK 或手机浏览器连接网关；HarmonyOS 需自行构建、签名 |
@@ -19,7 +19,7 @@
 先确认当前 DSH Web 能正常打开，在运行 DSH 的同一用户下执行：
 
 ```sh
-dsh plugin --profile web add dsh-remote-plugin@latest
+dsh plugin --profile web add @hyprnos/dsh-remote-plugin@latest
 dsh plugin --profile web list --depth 0
 ```
 
@@ -36,7 +36,7 @@ dsh plugin --profile web list --depth 0
 
 多网卡主机可在管理页勾选要写入二维码的地址。多个 `server` 参数会导入多个连接地址，令牌绑定各地址。使用独立设备密钥时，为设备生成其专用二维码。
 
-固定版本使用 `dsh-remote-plugin@<已发布版本>`。`@next` 可用于候选版通道，`@latest` 通常用于稳定通道，但标签当前指向需要查询 npm，不能根据本地 rc.9 版本推断已公开发布。
+固定版本使用 `@hyprnos/dsh-remote-plugin@<已发布版本>`。`@next` 可用于候选版通道，`@latest` 通常用于稳定通道，但标签当前指向需要查询 npm，不能根据本地 rc.9 版本推断已公开发布。
 
 Git 源安装示例：
 

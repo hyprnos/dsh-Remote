@@ -537,6 +537,24 @@ body.in-session.has-composer-images .history { padding-bottom: calc(146px + var(
 .composer-image-btn { flex: 0 0 42px; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; color: var(--dsr-info); background: var(--dsr-panel); border: 1px solid var(--dsr-line); }
 .composer-image-btn svg { width: 20px; height: 20px; }
 .composer-image-btn:active, .composer-image-btn.active { color: var(--dsr-accent-strong); background: var(--dsr-accent-soft); border-color: var(--dsr-accent-line); }
+/* 语音输入按钮：与图片按钮同规格；录音态红点脉冲，转写/准备中不可点 */
+.composer-mic-btn { flex: 0 0 42px; width: 42px; height: 42px; display: grid; place-items: center; position: relative; border-radius: 14px; color: var(--dsr-info); background: var(--dsr-panel); border: 1px solid var(--dsr-line); }
+.composer-mic-btn svg { width: 20px; height: 20px; }
+.composer-mic-btn:active { color: var(--dsr-accent-strong); background: var(--dsr-accent-soft); border-color: var(--dsr-accent-line); }
+.composer-mic-btn:disabled { opacity: .55; }
+.composer-mic-btn.recording { color: var(--dsr-error); background: var(--dsr-error-soft); border-color: var(--dsr-error-line); }
+.composer-mic-btn.recording::after { content: ''; position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--dsr-error); animation: dsr-voice-pulse 1.2s ease-out infinite; }
+@keyframes dsr-voice-pulse { 0% { box-shadow: 0 0 0 0 currentColor; opacity: 1; } 70% { box-shadow: 0 0 0 6px transparent; opacity: .68; } 100% { box-shadow: 0 0 0 0 transparent; opacity: 1; } }
+/* 语音内联提示行（录音计时/转写中/模型准备与进度），由 voice-input.js 动态插入输入区上方 */
+.voice-input-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; color: var(--dsr-text); font-size: 12px; line-height: 1.35; }
+.voice-input-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dsr-info); }
+.voice-input-text { flex: 1; min-width: 0; overflow: hidden; color: var(--dsr-muted); text-overflow: ellipsis; white-space: nowrap; }
+.voice-input-bar.recording .voice-input-text { color: var(--dsr-error); font-weight: 600; }
+.voice-input-bar.recording .voice-input-dot { background: var(--dsr-error); animation: dsr-voice-pulse 1.2s ease-out infinite; }
+.voice-input-bar.error .voice-input-text { color: var(--dsr-error); }
+.voice-input-bar.error .voice-input-dot { background: var(--dsr-error); }
+.voice-input-action { flex: none; padding: 5px 11px; border-radius: 9px; border: 1px solid var(--dsr-accent-line); background: var(--dsr-accent-soft); color: var(--dsr-accent-strong); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.voice-input-action:active { background: var(--dsr-panel-2); }
 .composer-image-menu { position: absolute; right: 12px; bottom: 58px; z-index: 4; display: flex; gap: 7px; padding: 7px; border: 1px solid var(--dsr-line); border-radius: 14px; background: var(--dsr-bg-2); box-shadow: 0 12px 30px var(--dsr-shadow); }
 .composer-image-option { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 6px 10px; border: 1px solid var(--dsr-line); border-radius: 10px; background: var(--dsr-panel); color: var(--dsr-text); font: inherit; font-size: 12px; }
 .composer-image-option svg { width: 16px; height: 16px; color: var(--dsr-info); }
@@ -568,6 +586,9 @@ body.in-session.has-composer-images .history { padding-bottom: calc(146px + var(
 .composer-wrap.fs .composer-fs-btn { top: 7px; right: 7px; width: 30px; height: 30px; }
 .composer-wrap.fs .plus-btn { display: none; }
 .composer-wrap.fs .composer-image-btn, .composer-wrap.fs .composer-image-menu, .composer-wrap.fs .send-btn { display: none; }
+/* 全屏编辑时图片/发送隐藏，语音入口保留（长文本口述比打字方便），钉在顶部不随输入框拉伸 */
+.composer-wrap.fs .composer-mic-btn { display: grid; align-self: flex-start; flex: 0 0 42px; height: 42px; }
+.composer-wrap.fs .voice-input-bar { padding: 8px 12px 0; }
 .composer-wrap.fs .composer-image-menu { bottom: 58px; }
 body.composer-fullscreen { overflow: hidden; }
 .plus-btn {

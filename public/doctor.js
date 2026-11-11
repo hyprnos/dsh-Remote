@@ -200,8 +200,8 @@
       '6. If evidence is unavailable because a tool approval was denied, say so and continue with the remaining evidence.',
       '',
       '## Collect evidence',
-      '1. Identify the client surface, affected component (DSH host, dsh-remote-plugin, gateway, network, or model provider), failure timing, reproducibility, and user impact.',
-      '2. Establish versions: DSH, `dsh-remote-plugin`, gateway `/health`, client build, OS/runtime.',
+      '1. Identify the client surface, affected component (DSH host, @hyprnos/dsh-remote-plugin, gateway, network, or model provider), failure timing, reproducibility, and user impact.',
+      '2. Establish versions: DSH, `@hyprnos/dsh-remote-plugin`, gateway `/health`, client build, OS/runtime.',
       '3. Discover the gateway port from `DSH_REMOTE_GATEWAY_PORT`, then `~/.dsh-remote/gateway-port`, then `8787`; inspect the loopback `/health` response.',
       '4. Inspect only recent relevant entries from `~/.dsh-remote/plugin-gateway.log` or the host log the user points to. Never inspect token or credential files.',
       '5. Use the supplied client diagnostic summary to identify the failing RPC phase, history/cache/render path, WebSocket close code or polling fallback, error category, and location.',
@@ -229,8 +229,8 @@
       '6. 若工具审批被拒绝导致证据缺失，明确说明，并继续使用剩余证据。',
       '',
       '## 收集证据',
-      '1. 先确认客户端界面、受影响的组件（DSH 主机、dsh-remote-plugin、网关、网络或模型服务）、发生时机、复现概率和影响。',
-      '2. 核对版本：DSH、`dsh-remote-plugin`、网关 `/health`、客户端 build、操作系统/运行时。',
+      '1. 先确认客户端界面、受影响的组件（DSH 主机、@hyprnos/dsh-remote-plugin、网关、网络或模型服务）、发生时机、复现概率和影响。',
+      '2. 核对版本：DSH、`@hyprnos/dsh-remote-plugin`、网关 `/health`、客户端 build、操作系统/运行时。',
       '3. 按 `DSH_REMOTE_GATEWAY_PORT`、`~/.dsh-remote/gateway-port`、默认 `8787` 的顺序确定网关端口，读取回环 `/health`。',
       '4. 只查看 `~/.dsh-remote/plugin-gateway.log` 或用户指定主机日志的最近相关条目；不要查看 token、凭证或 Cookie 文件。',
       '5. 使用随消息提供的客户端脱敏诊断摘要，定位失败 RPC 阶段、历史/缓存/渲染路径、WebSocket 关闭码或轮询降级、错误类别和位置。',
@@ -267,7 +267,7 @@
     ]
     if(options.target?.kind==='loaded-plugin' || options.target?.kind==='source-workspace') {
       lines.push('',lang==='en'?'## Diagnosis target':'## 诊断目标',
-        lang==='en'?'Target: the currently loaded dsh-remote-plugin; source files are not installation evidence.':'诊断对象是当前加载的 dsh-remote-plugin；源码文件不能代替实装证据。',
+        lang==='en'?'Target: the currently loaded @hyprnos/dsh-remote-plugin; source files are not installation evidence.':'诊断对象是当前加载的 @hyprnos/dsh-remote-plugin；源码文件不能代替实装证据。',
         options.target.kind==='loaded-plugin'?(lang==='en'?'This session starts in the loaded plugin directory. Inspect package.json here first.':'本会话从实际加载的插件目录启动，先核对当前目录的 package.json。'):(lang==='en'?'This session starts in a user-selected workspace. Establish the running plugin location separately and compare it with this source workspace.':'本会话从用户选择的工作区启动，请另行确认运行插件的位置，再与源码工作区比较。'))
     }
     if (diagnostics) {

@@ -31,7 +31,7 @@ function getFreePort() {
 }
 
 test('插件运行时：真实挂载 /remote 并执行管理与命令链路', async (t) => {
-  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-remote-plugin-runtime-'))
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-remote-runtime-'))
   const configDir = path.join(tmpHome, '.dsh-remote')
   fs.mkdirSync(configDir, { recursive: true })
   fs.writeFileSync(path.join(configDir, 'token'), TOKEN + '\n', { mode: 0o600 })

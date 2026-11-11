@@ -1,5 +1,5 @@
 # dsh-remote bundle patch: 把插件自身 insert 进 profile 层栈
 # id 与包名一致: loader 以 entry id 为键, 通用 id 会被同名插件顶掉
 - insert:
-    - id: dsh-remote-plugin
-      name: 'dsh-remote-plugin'
+    - id: '@hyprnos/dsh-remote-plugin'
+      name: '@hyprnos/dsh-remote-plugin'

@@ -6,7 +6,7 @@
 
 [English](README.md) · **简体中文**
 
-[![npm](https://img.shields.io/npm/v/dsh-remote-plugin)](https://www.npmjs.com/package/dsh-remote-plugin)
+[![npm](https://img.shields.io/npm/v/@hyprnos%2Fdsh-remote-plugin)](https://www.npmjs.com/package/@hyprnos/dsh-remote-plugin)
 [![Release](https://img.shields.io/github/v/release/Blank-not-black/dsh-Remote?label=release)](https://github.com/Blank-not-black/dsh-Remote/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/Blank-not-black/dsh-Remote/release-build.yml?branch=main&label=CI)](https://github.com/Blank-not-black/dsh-Remote/actions/workflows/release-build.yml)
 [![Compat](https://img.shields.io/github/actions/workflow/status/Blank-not-black/dsh-Remote/compat.yml?branch=main&label=compat)](https://github.com/Blank-not-black/dsh-Remote/actions/workflows/compat.yml)
@@ -53,7 +53,7 @@ DSH Remote 由 DSH 插件、单文件网关和多端客户端组成。插件提�
 先确认 DSH Web 能正常打开，在运行 DSH 的同一用户下执行：
 
 ```sh
-dsh plugin --profile web add dsh-remote-plugin@latest
+dsh plugin --profile web add @hyprnos/dsh-remote-plugin@latest
 dsh plugin --profile web list --depth 0
 ```
 

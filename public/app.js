@@ -141,6 +141,8 @@ for (const key of ['server', 'token']) {
       window.DshFileInbox?.reset()
       window.DshSessionDeck?.reset()
       window.DshApprovalSummary?.reset()
+      // 语音入口跟连接身份绑定：换了地址/令牌就重新探测 speech.catalog
+      window.DshVoiceInput?.reset?.()
       if (typeof document !== 'undefined') document.getElementById('btn-insights')?.classList.add('hidden')
       if(typeof document!=='undefined') {
         const identityGeneration=connectionGeneration
@@ -8585,6 +8587,7 @@ window.addEventListener('dsh-native-insets', applyNativeInsets)
 async function boot() {
   initToken()
   bindUi()
+  mountVoiceInput()
   syncBgConfig()
   renderAnnouncementBoard()
   renderLangBtn()
@@ -8618,6 +8621,16 @@ async function boot() {
 
 document.addEventListener('DOMContentLoaded', boot)
 document.addEventListener('DOMContentLoaded', mountWorkflow)
+
+// 语音输入：录音→转写→插入草稿。实现全在 voice-input.js，这里只注入依赖。
+function mountVoiceInput() {
+  window.DshVoiceInput?.mount({
+    rpc, toast, authFailure, $, autosize,
+    t: (key, vars) => t(key, vars),
+    server: () => state.server,
+    token: () => state.token
+  })
+}
 
 function mountWorkflow() {
   window.DshWorkflow?.mount({

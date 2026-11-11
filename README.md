@@ -4,7 +4,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-[![npm](https://img.shields.io/npm/v/dsh-remote-plugin)](https://www.npmjs.com/package/dsh-remote-plugin)
+[![npm](https://img.shields.io/npm/v/@hyprnos%2Fdsh-remote-plugin)](https://www.npmjs.com/package/@hyprnos/dsh-remote-plugin)
 [![Release](https://img.shields.io/github/v/release/Blank-not-black/dsh-Remote?label=release)](https://github.com/Blank-not-black/dsh-Remote/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/Blank-not-black/dsh-Remote/release-build.yml?branch=main&label=CI)](https://github.com/Blank-not-black/dsh-Remote/actions/workflows/release-build.yml)
 [![Compat](https://img.shields.io/github/actions/workflow/status/Blank-not-black/dsh-Remote/compat.yml?branch=main&label=compat)](https://github.com/Blank-not-black/dsh-Remote/actions/workflows/compat.yml)
@@ -51,7 +51,7 @@ Image understanding depends on DSH and the model. Cost estimates do not replace 
 Confirm that DSH Web works, then run as the same user:
 
 ```sh
-dsh plugin --profile web add dsh-remote-plugin@latest
+dsh plugin --profile web add @hyprnos/dsh-remote-plugin@latest
 dsh plugin --profile web list --depth 0
 ```
 

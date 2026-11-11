@@ -1,7 +1,7 @@
 {
-  "name": "dsh-remote-plugin",
-  "version": "0.8.7",
-  "description": "DSH Remote 官方 bundle 插件：更多菜单中的手机连接入口、首次连接提示与浏览器管理控制台；内置网关自动启停，支持手机远程会话、审批、文件互传和设备管理。",
+  "name": "@hyprnos/dsh-remote-plugin",
+  "version": "0.8.8",
+  "description": "DSH Remote（个人分支）bundle 插件：手机连接入口、首次连接提示与浏览器管理控制台；内置网关自动启停，支持手机远程会话、审批、文件互传、语音输入和设备管理。",
   "type": "module",
   "main": "./index.mjs",
   "exports": {
@@ -43,14 +43,14 @@
     "mobile"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/Blank-not-black/dsh-Remote",
+  "homepage": "https://github.com/hyprnos/dsh-Remote",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Blank-not-black/dsh-Remote.git",
+    "url": "git+https://github.com/hyprnos/dsh-Remote.git",
     "directory": "packages/plugin"
   },
   "bugs": {
-    "url": "https://github.com/Blank-not-black/dsh-Remote/issues"
+    "url": "https://github.com/hyprnos/dsh-Remote/issues"
   },
   "publishConfig": {
     "access": "public"

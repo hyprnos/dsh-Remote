@@ -4,7 +4,7 @@
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http')
 const { createHash } = require('node:crypto'), { pathToFileURL } = require('node:url')
 const home = process.env.DSH_HOME, config = JSON.parse(fs.readFileSync(path.join(home, 'self-update.json')))
-const remote = path.join(config.dir, 'node_modules/dsh-remote-plugin')
+const remote = path.join(config.dir, 'node_modules/@hyprnos/dsh-remote-plugin')
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const json = (res, status, value) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)) }
 
@@ -21,7 +21,7 @@ async function main() {
     fs.renameSync(remote, path.join(home, 'displaced-remote'))
     fs.cpSync(config.staged, remote, { recursive: true })
     const manifest = JSON.parse(fs.readFileSync(path.join(config.dir, 'package.json')))
-    manifest.dependencies['dsh-remote-plugin'] = config.target
+    manifest.dependencies['@hyprnos/dsh-remote-plugin'] = config.target
     fs.writeFileSync(path.join(config.dir, 'package.json'), JSON.stringify(manifest))
     fs.writeFileSync(path.join(config.dir, 'pnpm-lock.yaml'), config.targetLock)
     if (fs.existsSync(path.join(home, 'fail-after-replacement'))) throw Error('Injected CLI failure after package replacement')
@@ -50,7 +50,7 @@ async function main() {
   // tested separately by plugin-transaction-pnpm.test.js.
   const nativeFetch = globalThis.fetch
   globalThis.fetch = (url, options) => String(url).startsWith('https://registry.npmjs.org/')
-    ? Promise.resolve(new Response(JSON.stringify({ name: 'dsh-remote-plugin', version: config.target, dsh: { bundle: { patch: './cordis.patch.yml' } } })))
+    ? Promise.resolve(new Response(JSON.stringify({ name: '@hyprnos/dsh-remote-plugin', version: config.target, dsh: { bundle: { patch: './cordis.patch.yml' } } })))
     : nativeFetch(url, options)
   let route
   const effects = [], sockets = new Set()

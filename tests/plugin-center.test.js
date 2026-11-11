@@ -175,7 +175,7 @@ test('plugin operations reject injection, protected packages, stale revisions an
   for (const name of ['x & calc', '../x', '--help', 'github:user/repo', 'a@1.0.0', 'a\nb', 'evil\n']) {
     await assert.rejects(center.submit({ id, name, action: 'install', version: '1.0.0', revision }))
   }
-  await assert.rejects(center.submit({ id, name: 'dsh-remote-plugin', action: 'remove', revision }), /核心/)
+  await assert.rejects(center.submit({ id, name: '@hyprnos/dsh-remote-plugin', action: 'remove', revision }), /核心/)
   await assert.rejects(center.submit({ id, name: 'example-plugin', action: 'disable', revision: 'old' }), /刷新/)
   await assert.rejects(center.submit({ id, name: 'other-plugin', action: 'install', version: '1.0.0', revision }), /bundle/)
   assert.equal(launches, 0)
@@ -290,8 +290,8 @@ test('failed install records failure, preserves backup and releases lock without
 test('minimum release age diagnostics identify lockfile blockers including scoped packages', async () => {
   const { immatureReleaseNotice } = await modulePromise
   assert.equal(immatureReleaseNotice('unrelated error'), null)
-  const message = immatureReleaseNotice('[ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION]\n  dsh-remote-plugin@0.8.0-rc.4 was published at 2026-10-18T11:57:57Z\n  @scope/plugin@1.0.0 was published at 2026-10-18T11:57:57Z')
-  assert.match(message, /dsh-remote-plugin@0.8.0-rc.4/)
+  const message = immatureReleaseNotice('[ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION]\n  @hyprnos/dsh-remote-plugin@0.8.0-rc.4 was published at 2026-10-18T11:57:57Z\n  @scope/plugin@1.0.0 was published at 2026-10-18T11:57:57Z')
+  assert.match(message, /@hyprnos\/dsh-remote-plugin@0.8.0-rc.4/)
   assert.match(message, /@scope\/plugin@1.0.0/)
   assert.match(message, /第一条/)
   assert.match(message, /可能不是本次更新目标/)
@@ -302,7 +302,7 @@ test('minimum release age diagnostics identify lockfile blockers including scope
 test('policy failure keeps original configuration backup, reports actual blocker and never retries or edits policy', async t => {
   const { createPluginCenter, runWorker } = await modulePromise
   const { dir, profile } = fixture(t)
-  const policy = 'minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - dsh-remote-plugin@0.7.6\n  - dsh-remote-plugin@0.8.0-rc.4\n'
+  const policy = 'minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - @hyprnos/dsh-remote-plugin@0.7.6\n  - @hyprnos/dsh-remote-plugin@0.8.0-rc.4\n'
   fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), policy)
   fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), 'original-lockfile')
   const center = createPluginCenter({}, { profile, launch: async () => {}, details: async () => ({ bundle: true }) })
@@ -310,7 +310,7 @@ test('policy failure keeps original configuration backup, reports actual blocker
   let attempts = 0
   await runWorker(dir, profile.cli, id, async (_cli, _args, _dir, output) => {
     attempts++
-    output('\u001b[31m[ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION]\u001b[0m\n  dsh-remote-plugin@0.8.0-rc.4 was published at 2026-10-18T11:57:57Z\n')
+    output('\u001b[31m[ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION]\u001b[0m\n  @hyprnos/dsh-remote-plugin@0.8.0-rc.4 was published at 2026-10-18T11:57:57Z\n')
     fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), 'partially-mutated-lockfile')
     throw Error('DSH 插件命令失败，退出码 1')
   })
@@ -318,7 +318,7 @@ test('policy failure keeps original configuration backup, reports actual blocker
   assert.equal(attempts, 1)
   assert.equal(job.phase, 'failed')
   assert.equal(job.restartRequired, true)
-  assert.match(job.message, /dsh-remote-plugin@0.8.0-rc.4/)
+  assert.match(job.message, /@hyprnos\/dsh-remote-plugin@0.8.0-rc.4/)
   assert.match(job.message, /未自动回滚/)
   assert.equal(state.busy, false)
   assert.equal(fs.readFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'utf8'), policy)
@@ -448,35 +448,35 @@ test('legacy locks are recoverable only with the matching lock, revision and exp
 
 test('Remote self-update requires confirmation, backs up the old package and survives worker replacement', async t => {
  const {createPluginCenter}=await modulePromise,{profile,dir,manifest}=fixture(t)
- manifest.dependencies['dsh-remote-plugin']='1.0.0';manifest.dsh.profile.bundles.push('dsh-remote-plugin');fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify(manifest))
- const remote=path.join(dir,'node_modules/dsh-remote-plugin');fs.mkdirSync(remote,{recursive:true})
- fs.writeFileSync(path.join(remote,'package.json'),JSON.stringify({name:'dsh-remote-plugin',type:'module',version:'1.0.0',dsh:{bundle:{patch:'./patch.yml'}}}))
+ manifest.dependencies['@hyprnos/dsh-remote-plugin']='1.0.0';manifest.dsh.profile.bundles.push('@hyprnos/dsh-remote-plugin');fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify(manifest))
+ const remote=path.join(dir,'node_modules/@hyprnos/dsh-remote-plugin');fs.mkdirSync(remote,{recursive:true})
+ fs.writeFileSync(path.join(remote,'package.json'),JSON.stringify({name:'@hyprnos/dsh-remote-plugin',type:'module',version:'1.0.0',dsh:{bundle:{patch:'./patch.yml'}}}))
  const worker=path.join(remote,'plugin-center.mjs');fs.copyFileSync(path.join(__dirname,'../packages/plugin/plugin-center.mjs'),worker)
  fs.copyFileSync(path.join(__dirname,'../packages/plugin/plugin-transaction.mjs'),path.join(remote,'plugin-transaction.mjs'))
   fs.copyFileSync(path.join(__dirname,'../packages/plugin/market.mjs'),path.join(remote,'market.mjs'))
- fs.writeFileSync(profile.cli,`const fs=require('node:fs'),p=require('node:path');const remote=p.join(process.cwd(),'node_modules/dsh-remote-plugin'),m=JSON.parse(fs.readFileSync('package.json'));m.dependencies['dsh-remote-plugin']='1.0.1';fs.writeFileSync('package.json',JSON.stringify(m));const pkg=JSON.parse(fs.readFileSync(p.join(remote,'package.json')));fs.renameSync(remote,remote+'-old');fs.mkdirSync(remote);pkg.version='1.0.1';fs.writeFileSync(p.join(remote,'package.json'),JSON.stringify(pkg));fs.writeFileSync(p.join(remote,'plugin-center.mjs'),'export const upgraded=true;');`)
+ fs.writeFileSync(profile.cli,`const fs=require('node:fs'),p=require('node:path');const remote=p.join(process.cwd(),'node_modules/@hyprnos/dsh-remote-plugin'),m=JSON.parse(fs.readFileSync('package.json'));m.dependencies['@hyprnos/dsh-remote-plugin']='1.0.1';fs.writeFileSync('package.json',JSON.stringify(m));const pkg=JSON.parse(fs.readFileSync(p.join(remote,'package.json')));fs.renameSync(remote,remote+'-old');fs.mkdirSync(remote);pkg.version='1.0.1';fs.writeFileSync(p.join(remote,'package.json'),JSON.stringify(pkg));fs.writeFileSync(p.join(remote,'plugin-center.mjs'),'export const upgraded=true;');`)
  const loaded=await import(pathToFileURL(worker))
  const center=loaded.createPluginCenter({}, {profile,details:async()=>({bundle:true})})
- const body={id,action:'update',name:'dsh-remote-plugin',version:'1.0.1',revision:(await center.inventory()).revision}
+ const body={id,action:'update',name:'@hyprnos/dsh-remote-plugin',version:'1.0.1',revision:(await center.inventory()).revision}
  await assert.rejects(center.submit(body),/确认/)
  for(const action of ['remove','disable','enable'])await assert.rejects(center.submit({...body,action,confirmSelfUpdate:true}),/核心/)
  await center.submit({...body,confirmSelfUpdate:true})
  let state
  for(let i=0;i<100;i++){state=await center.inventory();if(state.operations[0]?.phase==='complete'||state.operations[0]?.phase==='failed')break;await new Promise(resolve=>setTimeout(resolve,50))}
  assert.ok(fs.existsSync(path.join(dir,'.remote-plugin-center','worker-'+id+'.mjs')))
- state=await createPluginCenter({}, {profile}).inventory();assert.equal(state.operations[0].phase,'complete',state.operations[0].message+'\n'+state.operations[0].log);assert.equal(state.items.find(r=>r.name==='dsh-remote-plugin').version,'1.0.1')
+ state=await createPluginCenter({}, {profile}).inventory();assert.equal(state.operations[0].phase,'complete',state.operations[0].message+'\n'+state.operations[0].log);assert.equal(state.items.find(r=>r.name==='@hyprnos/dsh-remote-plugin').version,'1.0.1')
  assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'.remote-plugin-center','backup-'+id,'remote-plugin/package.json'))).version,'1.0.0');assert.match(fs.readFileSync(worker,'utf8'),/upgraded=true/)
 })
 
 test('Remote rename EPERM preserves the backup, does not retry, and explains the required host recovery',async t=>{
  const {createPluginCenter,runWorker}=await modulePromise,{profile,dir,manifest}=fixture(t)
- manifest.dependencies['dsh-remote-plugin']='1.0.0';manifest.dsh.profile.bundles.push('dsh-remote-plugin');fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify(manifest))
- const remote=path.join(dir,'node_modules/dsh-remote-plugin');fs.mkdirSync(remote)
- fs.writeFileSync(path.join(remote,'package.json'),JSON.stringify({name:'dsh-remote-plugin',version:'1.0.0',dsh:{bundle:{patch:'./patch.yml'}}}))
+ manifest.dependencies['@hyprnos/dsh-remote-plugin']='1.0.0';manifest.dsh.profile.bundles.push('@hyprnos/dsh-remote-plugin');fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify(manifest))
+ const remote=path.join(dir,'node_modules/@hyprnos/dsh-remote-plugin');fs.mkdirSync(remote,{recursive:true})
+ fs.writeFileSync(path.join(remote,'package.json'),JSON.stringify({name:'@hyprnos/dsh-remote-plugin',version:'1.0.0',dsh:{bundle:{patch:'./patch.yml'}}}))
  const center=createPluginCenter({}, {profile,launch:async()=>{},details:async()=>({bundle:true})})
- await center.submit({id,name:'dsh-remote-plugin',action:'update',version:'1.0.1',confirmSelfUpdate:true,revision:(await center.inventory()).revision})
+ await center.submit({id,name:'@hyprnos/dsh-remote-plugin',action:'update',version:'1.0.1',confirmSelfUpdate:true,revision:(await center.inventory()).revision})
  let attempts=0
- await runWorker(dir,profile.cli,id,async(cli,args,cwd,output)=>{attempts++;output('[ERR_PNPM_EPERM] EPERM: operation not permitted, rename dsh-remote-plugin_tmp -> dsh-remote-plugin');throw Error('DSH 插件命令失败，退出码 1')})
+ await runWorker(dir,profile.cli,id,async(cli,args,cwd,output)=>{attempts++;output('[ERR_PNPM_EPERM] EPERM: operation not permitted, rename @hyprnos/dsh-remote-plugin_tmp -> @hyprnos/dsh-remote-plugin');throw Error('DSH 插件命令失败，退出码 1')})
  const job=(await center.inventory()).operations[0]
  assert.equal(job.phase,'failed');assert.equal(attempts,1);assert.match(job.message,/Windows.*拒绝/);assert.match(job.message,/旧网关|DSH.*占用/);assert.match(job.message,/不能假定.*回滚/)
  assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'.remote-plugin-center','backup-'+id,'remote-plugin/package.json'))).version,'1.0.0')

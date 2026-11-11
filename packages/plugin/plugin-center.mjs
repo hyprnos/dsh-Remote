@@ -19,7 +19,7 @@ function atomic(path, value) {
   replaceFile(tmp, path)
 }
 const fail = (message, status = 400) => Object.assign(new Error(message), { status })
-const protectedPackage = name => name === 'dsh-remote-plugin' || name.startsWith('@deepseek-ai/')
+const protectedPackage = name => name === '@hyprnos/dsh-remote-plugin' || name.startsWith('@deepseek-ai/')
 const revision = path => createHash('sha256').update(readFileSync(path)).digest('hex')
 const registryDependency = value => typeof value === 'string' && !/[:/\\]/.test(value) && !value.startsWith('.')
 function newerVersion(next, previous) {
@@ -49,7 +49,7 @@ function batchTargets(body, state) {
     if (!newerVersion(target.version, item.version)) throw fail('批量更新不能重装、降级或替换未知版本：' + target.name, 409)
     return { name: target.name, version: target.version, fromVersion: item.version, enabled: item.enabled }
   })
-  return targets.sort((a, b) => (a.name === 'dsh-remote-plugin') - (b.name === 'dsh-remote-plugin') || a.name.localeCompare(b.name))
+  return targets.sort((a, b) => (a.name === '@hyprnos/dsh-remote-plugin') - (b.name === '@hyprnos/dsh-remote-plugin') || a.name.localeCompare(b.name))
 }
 const targetIdentity = targets => JSON.stringify((Array.isArray(targets) ? targets : []).map(target => ({ name: target?.name, version: target?.version })).sort((a, b) => String(a.name).localeCompare(String(b.name))))
 function adapterInterfaces(ctx) {
@@ -394,7 +394,7 @@ export function createPluginCenter(ctx, options = {}) {
   async function preflight(body) {
     if (!profile?.cli) throw fail('当前环境只读', 409)
     if (!body || !['install', 'update', 'remove', 'update-all'].includes(body.action) || !packagePattern.test(body.name || '') || (!['remove', 'update-all'].includes(body.action) && !versionPattern.test(body.version || ''))) throw fail('Invalid operation')
-    if (protectedPackage(body.name) && !(body.action === 'update' && body.name === 'dsh-remote-plugin')) throw fail('核心插件请通过主机维护流程管理', 409)
+    if (protectedPackage(body.name) && !(body.action === 'update' && body.name === '@hyprnos/dsh-remote-plugin')) throw fail('核心插件请通过主机维护流程管理', 409)
     if (body.revision !== revision(manifestPath)) throw fail('插件列表已变化，请刷新', 409)
     const state = await inventory()
     if (state.busy || state.profileLock && state.profileLock.state !== 'dead') throw fail('已有插件任务或配置锁，请等待后重试', 409)
@@ -436,7 +436,7 @@ export function createPluginCenter(ctx, options = {}) {
       return { name, displayName, version: pkg?.version || '', requested: manifest.dependencies?.[name] || '',
         enabled: bundles.includes(name), bundle: !!pkg?.dsh?.bundle?.patch || bundles.includes(name),
         managed: !!manifest.dependencies?.[name] && !protectedPackage(name),
-        selfUpdate: name === 'dsh-remote-plugin' && !!profile.cli,
+        selfUpdate: name === '@hyprnos/dsh-remote-plugin' && !!profile.cli,
       description: pkg?.description || '', runtime: runtime.filter(entry => entry.name === name) }
     })
     let operations = []
@@ -482,7 +482,7 @@ export function createPluginCenter(ctx, options = {}) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw fail('Invalid operation')
     const { id, action, name, version } = body
     if (!idPattern.test(id || '') || !packagePattern.test(name || '') || !['install', 'update', 'update-all', 'remove', 'enable', 'disable', 'restore'].includes(action)) throw fail('Invalid operation')
-    const selfUpdate = name === 'dsh-remote-plugin' && action === 'update'
+    const selfUpdate = name === '@hyprnos/dsh-remote-plugin' && action === 'update'
     if (protectedPackage(name) && !selfUpdate && action !== 'restore') throw fail('核心插件与 Remote 的卸载、启停请通过主机维护流程管理', 409)
     if (selfUpdate && body.confirmSelfUpdate !== true) throw fail('请确认 Remote 本体更新及重启后生效', 409)
     mkdirSync(storage, { recursive: true, mode: 0o700 })
@@ -512,7 +512,7 @@ export function createPluginCenter(ctx, options = {}) {
       if (action === 'update-all') {
         if (!plan || targetIdentity(plan.targets) !== targetIdentity(body.targets)) throw fail('批量更新必须使用已确认的完整预检列表', 409)
         batchTargets(body, await inventory())
-        if (plan.targets.some(target => target.name === 'dsh-remote-plugin') && body.confirmSelfUpdate !== true) throw fail('请确认批量更新包含 Remote 本体', 409)
+        if (plan.targets.some(target => target.name === '@hyprnos/dsh-remote-plugin') && body.confirmSelfUpdate !== true) throw fail('请确认批量更新包含 Remote 本体', 409)
       }
       if (action === 'restore') {
         if (!idPattern.test(body.restoreFrom || '') || body.confirmRestore !== true) throw fail('请确认恢复失败前的插件和配置', 409)
@@ -638,7 +638,7 @@ export async function runWorker(dir, cli, id, execute = runCli, cliMode = 'node'
       if (existsSync(join(dir, name))) copyFileSync(join(dir, name), join(backup, name))
     }
     if (existsSync(disabledPath)) copyFileSync(disabledPath, join(backup, 'disabled.json'))
-    if (job.name === 'dsh-remote-plugin' && !job.plan) cpSync(join(dir, 'node_modules', 'dsh-remote-plugin'), join(backup, 'remote-plugin'), { recursive: true, dereference: true })
+    if (job.name === '@hyprnos/dsh-remote-plugin' && !job.plan) cpSync(join(dir, 'node_modules', '@hyprnos/dsh-remote-plugin'), join(backup, 'remote-plugin'), { recursive: true, dereference: true })
     progress('profile-lock', '正在检查 DSH 配置锁。')
     const existingLock = await profileLock(dir, probe)
     if (existingLock) {
@@ -735,7 +735,7 @@ export async function runWorker(dir, cli, id, execute = runCli, cliMode = 'node'
       if (target.phase === 'running') { target.phase = 'failed'; target.message = job.message }
       else if (target.phase === 'queued') { target.phase = 'interrupted'; target.message = '前项失败，未执行；请先核对或恢复本次备份。' }
     }
-    if((job.name==='dsh-remote-plugin' || job.targets?.some(target => target.name === 'dsh-remote-plugin' && target.phase === 'failed')) && /(?:ERR_PNPM_)?(?:EPERM|EBUSY)/.test(job.log) && /rename/i.test(job.log)) {
+    if((job.name==='@hyprnos/dsh-remote-plugin' || job.targets?.some(target => target.name === '@hyprnos/dsh-remote-plugin' && target.phase === 'failed')) && /(?:ERR_PNPM_)?(?:EPERM|EBUSY)/.test(job.log) && /rename/i.test(job.log)) {
       job.message = 'Windows 拒绝替换 Remote 插件目录，可能仍有旧网关或 DSH 进程占用。更新未完成，配置和旧包备份已保留；请退出对应 DSH Desktop 及其 Remote 网关后，使用同一 Desktop 安装自带的 CLI 在当前 profile 重装目标版本，再启动 DSH。不要删除插件目录或强行覆盖；不能假定失败后已自动回滚。'
     }
     const policyNotice = job.message === String(error.message || error) ? immatureReleaseNotice(job.log) : null

@@ -14,7 +14,7 @@ export function watchDoctorWorkspaces(ctx) {
 }
 export function readDoctorTarget(ctx) {
   let version=''
-  try { const pkg=JSON.parse(readFileSync(join(DOCTOR_PLUGIN_ROOT,'package.json'),'utf8'));if(pkg.name==='dsh-remote-plugin')version=pkg.version } catch {}
+  try { const pkg=JSON.parse(readFileSync(join(DOCTOR_PLUGIN_ROOT,'package.json'),'utf8'));if(pkg.name==='@hyprnos/dsh-remote-plugin')version=pkg.version } catch {}
   let workspaces=[]
   try {
     const registry=registries.get(ctx) ?? ctx.get?.('workspaceRegistry') ?? ctx.get?.('workspace'),rows=registry?.list?.()

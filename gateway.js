@@ -3606,13 +3606,15 @@ const modernState = {
   followedSessions: new Set(),
 }
 
-async function callUpstreamRemote(endpoint, args, rpcId = crypto.randomUUID()) {
+async function callUpstreamRemote(endpoint, args, rpcId = crypto.randomUUID(), timeoutMs = UPSTREAM_REQUEST_TIMEOUT_MS) {
   const target = new URL('/api/' + endpoint, UPSTREAM)
   const response = await fetch(target, {
     method: 'POST',
     headers: dshUpstreamHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({ type: 'client-request', rpcId, method: endpoint, payload: { args } }),
-    signal: AbortSignal.timeout(UPSTREAM_REQUEST_TIMEOUT_MS),
+    // Per-call override: only speech transcription legitimately outlives the
+    // shared 30s RPC budget (upload + decode + inference in one round trip).
+    signal: AbortSignal.timeout(Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : UPSTREAM_REQUEST_TIMEOUT_MS),
   })
   const body = await response.json().catch(() => null)
   return { status: response.status, body }
@@ -3732,7 +3734,91 @@ function modernPermissionCatalog(value) {
   }
 }
 
+// ---------- 语音输入（可选的 speech-to-text 实验 bundle） ----------
+// 上游是生成的直连 RPC `speech/<verb>`，参数按位置展开；手机端沿用 Remote 的
+// 点号方法名（rpc('speech.catalog')）。网关只搬运参数，不解码音频。
+const SPEECH_RPC_ENDPOINTS = new Map([
+  ['speech.catalog', 'speech/catalog'],
+  ['speech.transcribe', 'speech/transcribe'],
+  ['speech.prepare', 'speech/prepare'],
+  ['speech.cancelPreparation', 'speech/cancelPreparation'],
+  ['speech.configure', 'speech/configure'],
+])
+// 120s 录音（宿主默认上限）base64 后约 4.88 MiB，超过通用 /api/* 的 4 MiB 上限。
+const SPEECH_TRANSCRIBE_MAX_BYTES = 8 * 1024 * 1024
+const SPEECH_TRANSCRIBE_TIMEOUT_MS = 180000
+const SPEECH_UNAVAILABLE_MESSAGE = 'DSH 主机未启用语音输入（speech-to-text），请安装并启用 @deepseek-ai/dsh-experimental-api-speech-to-text 后重试。'
+
+function speechRpcArgs(method, payload) {
+  const value = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}
+  if (method === 'speech.transcribe') {
+    // 兼容两种写法：契约里的 { request: {...} }，以及直接平铺转写字段的调用方。
+    if (value.request && typeof value.request === 'object' && !Array.isArray(value.request)) return { request: value.request }
+    return { request: typeof value.audioBase64 === 'string' ? value : {} }
+  }
+  if (method === 'speech.prepare') {
+    return value.options === undefined ? { providerId: value.providerId } : { providerId: value.providerId, options: value.options }
+  }
+  if (method === 'speech.cancelPreparation') return { providerId: value.providerId }
+  if (method === 'speech.configure') {
+    const patch = value.patch && typeof value.patch === 'object' && !Array.isArray(value.patch) ? { ...value.patch } : {}
+    if (value.providerId !== undefined && patch.providerId === undefined) patch.providerId = value.providerId
+    if (value.language !== undefined && patch.language === undefined) patch.language = value.language
+    return { patch }
+  }
+  return {}
+}
+
+// speech 的失败必须是可读信封：主机没启用该 bundle 时上游给 404（非 JSON），
+// 不能让翻译层把它当成“需要 legacy 回退”而让手机收到无结构的 404/502。
+async function translateSpeechRpc(method, payload, rpcId) {
+  const endpoint = SPEECH_RPC_ENDPOINTS.get(method)
+  if (!endpoint) return legacyFallback('no generated RPC adapter for ' + method)
+  const timeoutMs = method === 'speech.transcribe' ? SPEECH_TRANSCRIBE_TIMEOUT_MS : UPSTREAM_REQUEST_TIMEOUT_MS
+  let response
+  try {
+    response = await callUpstreamRemote(endpoint, speechRpcArgs(method, payload), rpcId, timeoutMs)
+  } catch (error) {
+    const text = String(error?.name || '') + ' ' + String(error?.message || '')
+    const timedOut = /abort|timeout|timed out/i.test(text)
+    recordCompatibility(timedOut ? 'speech-timeout' : 'speech-transport-error', { method, detail: error?.message || error })
+    return legacyEnvelope(rpcId, modernError(
+      timedOut ? '语音转写超时：DSH 主机没有在时限内返回结果，请重试或缩短录音。' : '无法连接 DSH 语音接口，请确认主机在线后重试。',
+      timedOut ? 'speech/timeout' : 'speech/unreachable',
+      { method }))
+  }
+  if (response.status === 404) {
+    // 能力缺失而非错误：手机据此隐藏麦克风，下次 speech.catalog 再探测。
+    recordCompatibility('speech-unavailable', { method, status: response.status })
+    return legacyEnvelope(rpcId, modernError(SPEECH_UNAVAILABLE_MESSAGE, 'speech/unavailable', { method }))
+  }
+  const result = response.body?.result
+  if (!result || typeof result.ok !== 'boolean') {
+    recordCompatibility('speech-invalid-response', { method, status: response.status })
+    return legacyEnvelope(rpcId, modernError(
+      `DSH 语音接口返回了无法识别的响应（HTTP ${Number(response.status) || 0}），请确认主机版本后重试。`,
+      'speech/bad-response',
+      { method, status: Number(response.status) || 0 }))
+  }
+  if (!result.ok) {
+    const upstream = result.error && typeof result.error === 'object' ? result.error : {}
+    const code = typeof upstream.code === 'string' && /^[A-Za-z0-9][A-Za-z0-9/_.-]{0,79}$/.test(upstream.code) ? upstream.code : 'speech/failed'
+    const message = typeof upstream.message === 'string' && upstream.message.trim()
+      ? upstream.message.trim().slice(0, 500)
+      : `DSH 语音接口返回错误（HTTP ${Number(response.status) || 0}）。`
+    recordCompatibility('speech-rpc-error', { method, status: response.status, detail: code })
+    return legacyEnvelope(rpcId, modernError(message, code, {
+      ...(upstream.details && typeof upstream.details === 'object' && !Array.isArray(upstream.details) ? upstream.details : {}),
+      method,
+    }))
+  }
+  return legacyEnvelope(rpcId, { ok: true, value: result.value })
+}
+
 async function translateModernRpc(method, payload, rpcId, strictReceipt = false) {
+  // 语音（可选的 speech-to-text 实验 bundle）有独立失败语义：宿主没启用时上游给
+  // 404，必须回 speech/unavailable 信封，而不是让翻译层走 legacy 回退。
+  if (method.startsWith('speech.')) return translateSpeechRpc(method, payload, rpcId)
   const migrationFailure = response => method === 'session.history' && /cannot safely transform unclassified message source|migration-required|source v0 artifact remains unchanged/i.test(JSON.stringify(response.body?.result?.error || {}))
   const migrationReply = () => legacyEnvelope(rpcId, modernError('The source session format cannot be migrated by DSH. Update DSH and open the original session there before retrying; Remote will not rewrite its log.', 'session/migration-required', { sessionId: payload.sessionId }))
   let endpoint = ''
@@ -7026,10 +7112,24 @@ const ADAPTIVE_RPC_METHODS = new Set([
   'goal.pause', 'goal.resume', 'goal.complete', 'goal.clear', 'subagent.list',
   'subagent.interrupt', 'settings.describe', 'settings.mutate', 'settings.openDocument',
   'credentials.describe', 'credentials.set', 'credentials.unset', 'llm.providers', 'llm.discoverModels',
+  // 语音输入：可选实验 bundle，缺失时由 translateSpeechRpc 回 speech/unavailable 信封。
+  'speech.catalog', 'speech.transcribe', 'speech.prepare', 'speech.cancelPreparation', 'speech.configure',
 ])
 
-function readApiRequest(req, maxBytes = 4 * 1024 * 1024) {
-  return readBody(req, maxBytes)
+const API_REQUEST_MAX_BYTES = 4 * 1024 * 1024
+
+// 只有语音转写需要更大的请求体：120s 录音 base64 约 4.88 MiB。其余 /api/* 仍按
+// 4 MiB 拒绝，避免误传大文件放大网关内存。按路径判断，因为方法名要读完 body 才知道。
+function apiRequestMaxBytes(url) {
+  return url && url.pathname === '/api/speech.transcribe' ? SPEECH_TRANSCRIBE_MAX_BYTES : API_REQUEST_MAX_BYTES
+}
+
+function readApiRequest(req, maxBytes = API_REQUEST_MAX_BYTES) {
+  return readBody(req, maxBytes).catch(error => {
+    // 413 必须报告本次请求的真实上限，客户端据此提示可录时长。
+    if (error && error.status === 413 && error.max === undefined) error.max = maxBytes
+    throw error
+  })
 }
 
 // Only the explicit pre-admission image rejection is safe to retry. Never retry
@@ -7284,7 +7384,7 @@ async function serveOperations(req, res, url) {
 }
 
 async function proxyLegacyRpcWithModernFallback(req, res, url) {
-  const raw = await readApiRequest(req)
+  const raw = await readApiRequest(req, apiRequestMaxBytes(url))
   const legacy = await forwardLegacyRpc(url, raw)
   if (![404, 405, 501].includes(legacy.status)) {
     if (legacy.status >= 400) recordCompatibility('legacy-rpc-error', { method: url.pathname.slice('/api/'.length), status: legacy.status })
@@ -7305,7 +7405,11 @@ async function proxyLegacyRpcWithModernFallback(req, res, url) {
   }
   // A generated RPC completed, so subsequent requests and live collectors can use
   // the modern contract immediately instead of waiting for the periodic probe.
-  if (body.method !== 'host.describe') {
+  // `speech/unavailable` is not evidence either way: a modern host without the
+  // optional bundle answers the same 404, and an old host must stay `legacy` so
+  // its live collectors keep using the old double-stream contract.
+  const speechUnavailable = translated?.result?.ok === false && translated.result.error?.code === 'speech/unavailable'
+  if (body.method !== 'host.describe' && !speechUnavailable) {
     const previous = upstreamApiFlavor
     upstreamApiFlavor = 'modern'
     upstreamApiFlavorCheckedAt = Date.now()
@@ -7341,9 +7445,10 @@ async function proxyModernApi(req, res, url) {
   // dsh-context is a Connection Fetch route with its own JSON contract, not RPC.
   if (url.pathname === '/api/dsh-context/detail') return false
   if (await detectUpstreamApiFlavor() !== 'modern') return false
+  const maxBytes = apiRequestMaxBytes(url)
   let raw = ''
   try {
-    raw = await readApiRequest(req)
+    raw = await readApiRequest(req, maxBytes)
     const body = JSON.parse(raw || '{}')
     cors(res)
     if (url.pathname === '/api/respond') {
@@ -7395,7 +7500,7 @@ async function proxyModernApi(req, res, url) {
       cors(res)
       res.writeHead(error.status === 413 ? 413 : 502, { 'content-type': 'application/json; charset=utf-8' })
     }
-    if (!res.writableEnded) res.end(JSON.stringify(error.status === 413 ? { error: 'body-too-large', max: 4 * 1024 * 1024 } : { error: 'upstream-incompatible', detail: String(error?.message || error) }))
+    if (!res.writableEnded) res.end(JSON.stringify(error.status === 413 ? { error: 'body-too-large', max: Number(error.max) || maxBytes } : { error: 'upstream-incompatible', detail: String(error?.message || error) }))
     return true
   }
 }
@@ -7548,8 +7653,9 @@ function proxyApi(req, res, url) {
     if (!handled) return proxyLegacyApi(req, res, url)
   }).catch(error => {
     cors(res)
+    const maxBytes = Number(error?.max) || apiRequestMaxBytes(url)
     if (!res.headersSent) res.writeHead(error.status === 413 ? 413 : 502, { 'content-type': 'application/json; charset=utf-8' })
-    if (!res.writableEnded) res.end(JSON.stringify(error.status === 413 ? { error: 'body-too-large', max: 4 * 1024 * 1024 } : { error: 'upstream-unreachable', detail: String(error?.message || error) }))
+    if (!res.writableEnded) res.end(JSON.stringify(error.status === 413 ? { error: 'body-too-large', max: maxBytes } : { error: 'upstream-unreachable', detail: String(error?.message || error) }))
   })
 }
 

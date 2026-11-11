@@ -232,7 +232,7 @@ function setupDoctorPanel(options = {}) {
   }
 }
 
-const targetFixture={ok:true,schema:1,plugin:{path:'/fixture/installed/dsh-remote-plugin',version:'0.8.0-rc.8',kind:'loaded-plugin'},skill:{status:'registered'},workspaces:[{workspaceId:'source',title:'Source',path:'/fixture/source'}]}
+const targetFixture={ok:true,schema:1,plugin:{path:'/fixture/installed/@hyprnos/dsh-remote-plugin',version:'0.8.0-rc.8',kind:'loaded-plugin'},skill:{status:'registered'},workspaces:[{workspaceId:'source',title:'Source',path:'/fixture/source'}]}
 test('opening the panel only reads the target; starting defaults to the installed directory without attaching a workspace',async()=>{
   const calls=[]
   const view=setupDoctorPanel({loadTarget:async()=>targetFixture,workspaceId:'previous-workspace',rpc:async(method,payload)=>{calls.push({method,payload});return method==='session.create'?{sessionId:'diagnosis'}:{accepted:true}},openSession:async()=>{}})

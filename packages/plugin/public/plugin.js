@@ -21,7 +21,7 @@ function openConsole(event, section = '') {
   if (location.protocol === 'dsh-app:') location.assign(target)
   else window.open(target, '_blank', 'noopener')
 }
-function closePanel() { window.parent.postMessage({ source: 'dsh-remote-plugin', type: 'close' }, location.origin) }
+function closePanel() { window.parent.postMessage({ source: '@hyprnos/dsh-remote-plugin', type: 'close' }, location.origin) }
 function renderUsage(data, phase = '') {
   const target = $('plugin-cost-data')
   const html = window.DshInsights?.costHtml(data, phase, true, false, true) || '额度组件暂不可用'

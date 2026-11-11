@@ -62,7 +62,7 @@ async function fixture(t, workspace = 'minimumReleaseAge: 1440\n') {
   for (const key of Object.keys(process.env)) if (/proxy|^npm_config_minimum_release_age/i.test(key)) delete process.env[key]
   Object.assign(process.env, { HOME: home, USERPROFILE: home, DSH_HOME: home, DSH_REMOTE_FS_ROOT: home, TOKEN: 'transaction-test-token' })
   t.after(() => { for (const key of Object.keys(process.env)) if (!Object.hasOwn(previous, key)) delete process.env[key]; Object.assign(process.env, previous); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
-  const manifest = { dependencies: { 'example-plugin': '1.0.0', 'dsh-remote-plugin': '0.8.0-rc.4' }, dsh: { profile: { bundles: ['example-plugin', 'dsh-remote-plugin'] } } }
+  const manifest = { dependencies: { 'example-plugin': '1.0.0', '@hyprnos/dsh-remote-plugin': '0.8.0-rc.4' }, dsh: { profile: { bundles: ['example-plugin', '@hyprnos/dsh-remote-plugin'] } } }
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest))
   fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), lock(manifest.dependencies))
   fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), workspace)
@@ -95,7 +95,7 @@ function installBatchTarget(dir, args) {
   const pkg = path.join(dir, 'node_modules', name, 'package.json'), data = JSON.parse(fs.readFileSync(pkg))
   data.version = version; fs.writeFileSync(pkg, JSON.stringify(data))
 }
-async function batch(h, targets = [{ name: 'dsh-remote-plugin', version: '0.8.1' }, { name: 'example-plugin', version: '2.0.0' }]) {
+async function batch(h, targets = [{ name: '@hyprnos/dsh-remote-plugin', version: '0.8.1' }, { name: 'example-plugin', version: '2.0.0' }]) {
   const body = { id, name: 'all-plugins', action: 'update-all', targets, revision: (await h.center.inventory()).revision, confirmSelfUpdate: true }
   const plan = (await h.center.preflight(body)).plan
   return { body: { ...body, preflightKey: plan.key }, plan }
@@ -105,7 +105,7 @@ test('batch preflight includes every exact target in release-age consent and bin
   const h = await fixture(t)
   const { body, plan } = await batch(h, [{ name: 'example-plugin', version: '2.0.0' }])
   assert.ok(plan.blockers.some(row => row.name === 'example-plugin' && row.version === '2.0.0'))
-  assert.ok(plan.blockers.some(row => row.name === 'dsh-remote-plugin'), 'the whole old lockfile is still checked')
+  assert.ok(plan.blockers.some(row => row.name === '@hyprnos/dsh-remote-plugin'), 'the whole old lockfile is still checked')
   assert.equal(plan.workspace, undefined, 'private configuration is not returned')
   await assert.rejects(h.center.handle('POST', '/operations', body), /明确批准/)
   await assert.rejects(h.center.handle('POST', '/operations', { ...body, confirmReleasePolicy: true, targets: [{ name: 'example-plugin', version: '3.0.0' }] }), /完整预检列表/)
@@ -127,15 +127,15 @@ test('batch rejects local, core, missing, duplicate, non-plugin, downgrade and i
   fs.writeFileSync(pkg, JSON.stringify({ version: 'custom-build', dsh: { bundle: { patch: 'patch.yml' } } }))
   await assert.rejects(batch(h, [{ name: 'example-plugin', version: '2.0.0' }]), /未知版本/)
   fs.writeFileSync(pkg, JSON.stringify({ version: '1.0.0' }))
-  h.manifest.dsh.profile.bundles = ['dsh-remote-plugin']; fs.writeFileSync(path.join(h.dir, 'package.json'), JSON.stringify(h.manifest))
+  h.manifest.dsh.profile.bundles = ['@hyprnos/dsh-remote-plugin']; fs.writeFileSync(path.join(h.dir, 'package.json'), JSON.stringify(h.manifest))
   await assert.rejects(batch(h, [{ name: 'example-plugin', version: '2.0.0' }]), /registry/)
 })
 
 test('batch runs sequentially with Remote last, preserves disabled state and supports identical request retry', async t => {
   const h = await fixture(t, 'minimumReleaseAge: 0\n'), { runWorker } = await centerPromise
-  h.manifest.dsh.profile.bundles = ['dsh-remote-plugin']; fs.writeFileSync(path.join(h.dir, 'package.json'), JSON.stringify(h.manifest))
+  h.manifest.dsh.profile.bundles = ['@hyprnos/dsh-remote-plugin']; fs.writeFileSync(path.join(h.dir, 'package.json'), JSON.stringify(h.manifest))
   const { body, plan } = await batch(h)
-  assert.deepEqual(plan.targets.map(row => row.name), ['example-plugin', 'dsh-remote-plugin'])
+  assert.deepEqual(plan.targets.map(row => row.name), ['example-plugin', '@hyprnos/dsh-remote-plugin'])
   await assert.rejects(h.center.handle('POST', '/operations', { ...body, confirmSelfUpdate: false }), /Remote 本体/)
   await h.center.handle('POST', '/operations', body)
   const calls = []
@@ -146,7 +146,7 @@ test('batch runs sequentially with Remote last, preserves disabled state and sup
     calls.push(args[args.indexOf('add') + 1]); assert.ok(args.includes('--ignore-scripts')); assert.ok(args.includes('--save-exact'))
     installBatchTarget(dir, args)
   })
-  assert.deepEqual(calls, ['example-plugin@2.0.0', 'dsh-remote-plugin@0.8.1'])
+  assert.deepEqual(calls, ['example-plugin@2.0.0', '@hyprnos/dsh-remote-plugin@0.8.1'])
   const state = await h.center.inventory(), job = state.operations[0]
   assert.equal(job.phase, 'complete', job.message); assert.ok(job.targets.every(row => row.phase === 'complete'))
   assert.equal(state.items.find(row => row.name === 'example-plugin').enabled, false)
@@ -162,7 +162,7 @@ test('batch stops on partial failure and guarded restore undoes all earlier succ
   fs.mkdirSync(path.join(h.dir, 'node_modules', 'zebra-plugin'))
   fs.writeFileSync(path.join(h.dir, 'node_modules', 'zebra-plugin', 'package.json'), JSON.stringify({ version: '1.0.0', dsh: { bundle: { patch: './patch.yml' } } }))
   fs.writeFileSync(manifestPath, JSON.stringify(h.manifest)); fs.writeFileSync(path.join(h.dir, 'pnpm-lock.yaml'), lock(h.manifest.dependencies))
-  const { body } = await batch(h, [{ name: 'example-plugin', version: '2.0.0' }, { name: 'zebra-plugin', version: '2.0.0' }, { name: 'dsh-remote-plugin', version: '0.8.1' }])
+  const { body } = await batch(h, [{ name: 'example-plugin', version: '2.0.0' }, { name: 'zebra-plugin', version: '2.0.0' }, { name: '@hyprnos/dsh-remote-plugin', version: '0.8.1' }])
   await h.center.handle('POST', '/operations', body)
   let calls = 0
   await runWorker(h.dir, h.profile.cli, id, async (cli, args, dir) => {
@@ -199,16 +199,16 @@ test('accepted batch finishes in a real detached worker after the manager is rec
   assert.equal(state.operations[0].phase, 'complete', JSON.stringify(state.operations[0]) + '\n' + (fs.existsSync(workerLog) ? fs.readFileSync(workerLog, 'utf8') : 'No worker startup log'))
   assert.ok(state.operations[0].targets.every(target => target.phase === 'complete'))
   assert.equal(state.items.find(item => item.name === 'example-plugin').version, '2.0.0')
-  assert.equal(state.items.find(item => item.name === 'dsh-remote-plugin').version, '0.8.1')
+  assert.equal(state.items.find(item => item.name === '@hyprnos/dsh-remote-plugin').version, '0.8.1')
 })
 
 test('precise rule merging preserves unrelated settings and handles scoped/prerelease duplicate unions', async () => {
   const { mergeReleaseRules, releasePolicy } = await modulePromise
-  const raw = 'packages:\r\n  - .\r\nminimumReleaseAge: 1440\r\nminimumReleaseAgeExclude:\r\n  - dsh-remote-plugin@0.7.6 || 0.8.0-rc.2\r\n  - dsh-remote-plugin@0.8.0-rc.4\r\n  - "@scope/plugin@1.0.0"\r\nnodeLinker: hoisted\r\n'
+  const raw = 'packages:\r\n  - .\r\nminimumReleaseAge: 1440\r\nminimumReleaseAgeExclude:\r\n  - @hyprnos/dsh-remote-plugin@0.7.6 || 0.8.0-rc.2\r\n  - @hyprnos/dsh-remote-plugin@0.8.0-rc.4\r\n  - "@scope/plugin@1.0.0"\r\nnodeLinker: hoisted\r\n'
   const merged = mergeReleaseRules(raw, [{ name: '@scope/plugin', version: '1.0.1' }])
   assert.match(merged.raw, /0.7.6 \|\| 0.8.0-rc.2 \|\| 0.8.0-rc.4/)
   assert.match(merged.raw, /@scope\/plugin@1.0.0 \|\| 1.0.1/)
-  assert.equal((merged.raw.match(/  - "dsh-remote-plugin@/g) || []).length, 1)
+  assert.equal((merged.raw.match(/  - "@hyprnos\/dsh-remote-plugin@/g) || []).length, 1)
   assert.match(merged.raw, /minimumReleaseAge: 1440\r\n/); assert.match(merged.raw, /nodeLinker: hoisted\r\n/)
   assert.equal(releasePolicy(merged.raw, {}).minutes, 1440)
   assert.equal(mergeReleaseRules(merged.raw).raw, merged.raw)
@@ -247,25 +247,25 @@ test('large preflight budgets scale by batches, stay bounded and abort all looku
 
 test('local tarball lock entries are exempt from registry-age lookup but their installed versions are verified', async t => {
   const h = await fixture(t), { lockPackages, verifyInstalled, prepareReleasePlan } = await modulePromise
-  const manifest = { dependencies: { 'example-plugin': 'file:D:/fixtures/example.tgz', 'dsh-remote-plugin': '0.8.0-rc.4' }, dsh: h.manifest.dsh }
+  const manifest = { dependencies: { 'example-plugin': 'file:D:/fixtures/example.tgz', '@hyprnos/dsh-remote-plugin': '0.8.0-rc.4' }, dsh: h.manifest.dsh }
   fs.writeFileSync(path.join(h.dir, 'package.json'), JSON.stringify(manifest))
-  const raw = "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      example-plugin:\n        specifier: file:D:/fixtures/example.tgz\n        version: file:D:/fixtures/example.tgz\n      dsh-remote-plugin:\n        specifier: 0.8.0-rc.4\n        version: 0.8.0-rc.4\npackages:\n  'example-plugin@file:D:/fixtures/example.tgz':\n    resolution: {tarball: file:D:/fixtures/example.tgz}\n    version: 1.0.0\n  dsh-remote-plugin@0.8.0-rc.4: {}\n"
+  const raw = "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      example-plugin:\n        specifier: file:D:/fixtures/example.tgz\n        version: file:D:/fixtures/example.tgz\n      @hyprnos/dsh-remote-plugin:\n        specifier: 0.8.0-rc.4\n        version: 0.8.0-rc.4\npackages:\n  'example-plugin@file:D:/fixtures/example.tgz':\n    resolution: {tarball: file:D:/fixtures/example.tgz}\n    version: 1.0.0\n  @hyprnos/dsh-remote-plugin@0.8.0-rc.4: {}\n"
   fs.writeFileSync(path.join(h.dir, 'pnpm-lock.yaml'), raw)
-  assert.deepEqual(lockPackages(raw), [{ name: 'dsh-remote-plugin', version: '0.8.0-rc.4' }])
+  assert.deepEqual(lockPackages(raw), [{ name: '@hyprnos/dsh-remote-plugin', version: '0.8.0-rc.4' }])
   assert.doesNotThrow(() => verifyInstalled(h.dir, h.body))
   const queried = []
   await prepareReleasePlan(h.dir, { action: 'remove', name: 'example-plugin' }, async name => { queried.push(name); return { '0.8.0-rc.4': '2020-01-01T00:00:00Z' } }, {})
-  assert.deepEqual(queried, ['dsh-remote-plugin'])
+  assert.deepEqual(queried, ['@hyprnos/dsh-remote-plugin'])
   fs.writeFileSync(path.join(h.dir, 'node_modules/example-plugin/package.json'), JSON.stringify({ name: 'example-plugin', version: '9.0.0' }))
   assert.throws(() => verifyInstalled(h.dir, h.body), /不一致/)
 })
 
 test('preflight identifies the entire lockfile, includes first-match blockers and requires explicit approval', async t => {
-  const h = await fixture(t, 'minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - dsh-remote-plugin@0.7.6\n  - dsh-remote-plugin@0.8.0-rc.4\n')
-  assert.deepEqual(h.plan.blockers.map(row => row.name), ['dsh-remote-plugin', 'example-plugin'])
+  const h = await fixture(t, 'minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - @hyprnos/dsh-remote-plugin@0.7.6\n  - @hyprnos/dsh-remote-plugin@0.8.0-rc.4\n')
+  assert.deepEqual(h.plan.blockers.map(row => row.name), ['@hyprnos/dsh-remote-plugin', 'example-plugin'])
   assert.equal(Object.hasOwn(h.plan, 'workspace'), false)
-  assert.match(h.plan.ruleChanges[0], /dsh-remote-plugin@0.7.6 \|\| 0.8.0-rc.4/)
-  assert.match(fs.readFileSync(path.join(h.dir, 'pnpm-workspace.yaml'), 'utf8'), /  - dsh-remote-plugin@0.7.6\n  - dsh-remote/)
+  assert.match(h.plan.ruleChanges[0], /@hyprnos\/dsh-remote-plugin@0.7.6 \|\| 0.8.0-rc.4/)
+  assert.match(fs.readFileSync(path.join(h.dir, 'pnpm-workspace.yaml'), 'utf8'), /  - @hyprnos\/dsh-remote-plugin@0.7.6\n  - @hyprnos\/dsh-remote-plugin@0.8.0-rc.4/)
   await assert.rejects(h.center.handle('POST', '/operations', { ...h.body, preflightKey: undefined }), /预检/)
   await assert.rejects(h.center.submit(h.body), /明确批准/)
   assert.equal((await h.center.inventory()).busy, false)
@@ -292,7 +292,7 @@ test('approved worker snapshots the full tree, merges exact rules, and verifies 
   const job = (await h.center.inventory()).operations[0]
   assert.equal(job.phase, 'complete', job.message); assert.equal(attempts, 1)
   const backup = path.join(h.dir, '.remote-plugin-center', 'backup-' + id)
-  assert.equal(fs.readFileSync(path.join(backup, 'node_modules/dsh-remote-plugin/code.js'), 'utf8'), 'original dsh-remote-plugin')
+  assert.equal(fs.readFileSync(path.join(backup, 'node_modules/@hyprnos/dsh-remote-plugin/code.js'), 'utf8'), 'original @hyprnos/dsh-remote-plugin')
   assert.equal(JSON.parse(fs.readFileSync(path.join(backup, 'transaction.json'))).files['pnpm-workspace.yaml'], 'minimumReleaseAge: 1440\n')
   assert.equal((fs.readFileSync(path.join(h.dir, 'pnpm-workspace.yaml'), 'utf8').match(/example-plugin@2.0.0/g) || []).length, 1)
 })
@@ -398,7 +398,7 @@ test('a success exit with mismatched lockfile is failed and offers guarded recov
 test('failed install recovery restores all plugins, rules and lockfile, preserves the failed tree and cannot be replayed', async t => {
   const { runWorker } = await centerPromise, h = await fixture(t)
   await h.center.submit({ ...h.body, confirmReleasePolicy: true })
-  await runWorker(h.dir, h.profile.cli, id, async () => { install(h.dir); fs.writeFileSync(path.join(h.dir, 'node_modules/dsh-remote-plugin/code.js'), 'transitive mutation'); throw Error('network failure') })
+  await runWorker(h.dir, h.profile.cli, id, async () => { install(h.dir); fs.writeFileSync(path.join(h.dir, 'node_modules/@hyprnos/dsh-remote-plugin/code.js'), 'transitive mutation'); throw Error('network failure') })
   const state = await h.center.inventory(); assert.equal(state.operations[0].canRestore, true)
   const body = { id: id + '-restore', action: 'restore', name: 'example-plugin', restoreFrom: id, revision: state.revision, confirmRestore: true }
   await h.center.submit(body)
@@ -406,7 +406,7 @@ test('failed install recovery restores all plugins, rules and lockfile, preserve
   const jobs = (await h.center.inventory()).operations
   assert.equal(jobs.find(row => row.id === body.id).phase, 'complete')
   assert.equal(jobs.find(row => row.id === id).canRestore, false)
-  assert.equal(fs.readFileSync(path.join(h.dir, 'node_modules/dsh-remote-plugin/code.js'), 'utf8'), 'original dsh-remote-plugin')
+  assert.equal(fs.readFileSync(path.join(h.dir, 'node_modules/@hyprnos/dsh-remote-plugin/code.js'), 'utf8'), 'original @hyprnos/dsh-remote-plugin')
   assert.equal(fs.readFileSync(path.join(h.dir, 'node_modules/example-plugin/code.js'), 'utf8'), 'original example-plugin')
   assert.equal(fs.readFileSync(path.join(h.dir, 'pnpm-workspace.yaml'), 'utf8'), 'minimumReleaseAge: 1440\n')
   assert.equal(fs.readFileSync(path.join(h.dir, 'pnpm-lock.yaml'), 'utf8'), lock(h.manifest.dependencies))
