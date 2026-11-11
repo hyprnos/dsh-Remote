@@ -30,14 +30,20 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-    // 固定签名: 本地/CI 共用仓库内 debug keystore, 保证各版本 APK 可原地覆盖升级
-    // (签名信息公开, 适合无需上架商店的侧载 App; 上架前再换专用 release keystore)
+    // 固定签名: 本地与 CI 共用仓库内密钥库, 保证各版本 APK 可原地覆盖升级
+    // (密钥库随仓库公开, 适合无需上架商店的侧载 App; 上架前可再换专用发布密钥)
     signingConfigs {
+        // Release 签名: 专用密钥库(证书信息 CN=DSH Remote, O=hyprnos, 有效期 10000 天),
+        // 与旧版 debug 证书不同 —— 首次升级到该签名需要先卸载旧版。
+        // 密钥库随仓库分发(公开信息, 适合侧载; 上架商店前再换专用发布密钥)。
         remote {
-            storeFile file('keystore/dsh-remote-debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+            storeFile file('keystore/dsh-remote-release.keystore')
+            storePassword 'dshremote'
+            keyAlias 'dshremote'
+            keyPassword 'dshremote'
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
         }
     }
     buildTypes {
