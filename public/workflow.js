@@ -178,11 +178,15 @@
     for(const name of ['general','model','notify','about']){const row=home.querySelector(`[data-settings-group="${name}"]`);if(row)preferenceList.append(row)}
     preferences.append(preferenceTitle,preferenceList);home.append(work,preferences)
     // 语音输入设置入口：偏好与维护分组内紧跟「外观与输入」，弹层与内联条齿轮共用 voice-input.js
-    const voiceEntry=element('button','workflow-setting-link'),voiceName=element('span')
-    voiceEntry.type='button';voiceEntry.id='btn-voice-settings'
+    // 与同组其它行保持相同结构与字号（图标容器 + 标题/说明两行），单行 span 会显得字号偏大、基线不齐。
+    const voiceEntry=element('button','setting-row setting-link'),voiceText=element('div')
+    const voiceName=element('div','setting-name'),voiceDesc=element('div','setting-desc')
+    voiceEntry.type='button';voiceEntry.id='btn-voice-settings';voiceEntry.dataset.settingsGroup='voice'
     voiceName.dataset.i18n='voice.settings.entry';voiceName.textContent=root.I18N?.t?.('voice.settings.entry')||'语音输入'
+    voiceDesc.dataset.i18n='voice.settings.entryDesc';voiceDesc.textContent=root.I18N?.t?.('voice.settings.entryDesc')||'识别模型、语言与术语纠错'
     const voiceMark=element('span','workflow-setting-icon');voiceMark.append(icon('mic'))
-    voiceEntry.append(voiceMark,voiceName)
+    voiceText.append(voiceName,voiceDesc)
+    voiceEntry.append(voiceMark,voiceText)
     voiceEntry.addEventListener('click',()=>{root.DshVoiceInput?.openSettings?.()})
     const generalRow=preferenceList.querySelector('[data-settings-group="general"]')
     if(generalRow)generalRow.after(voiceEntry);else preferenceList.prepend(voiceEntry)
