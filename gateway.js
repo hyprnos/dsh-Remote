@@ -5496,7 +5496,8 @@ function serveStatic(req, res, url) {
     cors(res)
     const ims = req.headers['if-modified-since']
     const matched = req.headers['if-none-match']
-    const cache = ['/harmonyos-update.json','/build.json'].includes(pathname) ? 'no-store' : versioned ? 'no-cache' : 'public, max-age=300'
+    // 安装包按目标版本随 update.json 变化，URL 却固定：一律 no-store，避免任何中间缓存把旧 APK 端给客户端。
+    const cache = (['/harmonyos-update.json','/build.json'].includes(pathname) || apkOverride) ? 'no-store' : versioned ? 'no-cache' : 'public, max-age=300'
     const headers = { 'content-type': type, 'cache-control': cache, 'last-modified': lastModified, etag }
     if (text) addEncodingVary(headers, res.getHeader('vary'))
     if (cache !== 'no-store' && (matched ? String(matched).split(',').some(v => v.trim() === etag || v.trim() === '*') : !versioned && ims && new Date(ims).getTime() >= mtimeSec)) {

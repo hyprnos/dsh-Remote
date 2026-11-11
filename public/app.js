@@ -6221,7 +6221,9 @@ async function checkUpdate(silent) {
     if (info.version && cmpVersion(info.version, state.localVersion) > 0) {
       state.updateInfo = info
       const hasNotes = !!(info.notes && String(info.notes).trim())
-      $('update-desc').textContent = t('update.found', { version: info.version, notes: hasNotes ? '：' + info.notes : '' })
+      // 明确列出「本机版本 / 主机提供版本」：只有本机版本才是安装态证据，避免把主机版本误读成已装版本。
+      $('update-desc').textContent = t('update.foundBoth', { local: state.localVersion, version: info.version, notes: hasNotes ? '：' + info.notes : '' })
+      $('btn-download-update').textContent = t('update.downloadVersion', { version: info.version })
       $('update-desc').classList.remove('expanded')
       $('btn-update-expand').classList.toggle('hidden', !hasNotes)
       renderUpdateExpandBtn()
@@ -6230,7 +6232,9 @@ async function checkUpdate(silent) {
       else notify(t('update.foundTitle'), t('update.foundBody', { version: info.version }))
     } else {
       state.updateInfo = null
-      $('update-desc').textContent = state.localVersion ? t('update.latestV', { version: state.localVersion }) : t('update.latestRemote', { version: info.version || '?' })
+      $('update-desc').textContent = state.localVersion
+        ? t('update.latestBoth', { local: state.localVersion, version: info.version || state.localVersion })
+        : t('update.latestRemote', { version: info.version || '?' })
       $('btn-download-update').classList.add('hidden')
       resetUpdateExpand()
       if (!silent) toast(t('update.latestToast'), 'ok')
@@ -6341,7 +6345,8 @@ async function downloadUpdate(force = false) {
     const sha256=String(info?.sha256||'').trim().toLowerCase()
     if(!/^[0-9a-f]{64}$/.test(sha256))throw new Error(t('update.hashMissing'))
     const target=new URL(info.apkUrl||'dsh-remote.apk',base+'/')
-    if(force===true)target.searchParams.set('dshPatch',Date.now().toString(36)+'-'+sha256.slice(0,16))
+    // 始终按目标包哈希破除缓存：不同版本的 URL 不同，任何 HTTP/下载器缓存都不会再把旧 APK 端上来。
+    target.searchParams.set('dshPatch',sha256.slice(0,16)+(force===true?'-'+Date.now().toString(36):''))
     const url=target.href
     updateDownloadProgress({ phase: 'downloading', received: 0, total: 0 })
     if (CAP?.isNativePlatform?.() && window.NativeUpdate?.downloadVerifiedAndInstall && window.NativeUpdate?.getDownloadStatus) {
