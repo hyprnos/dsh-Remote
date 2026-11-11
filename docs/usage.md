@@ -81,6 +81,10 @@ Web/Android 对话上方的目标、任务、审批、提问、待接收文件�
 
 麦克风只在安全上下文显示：App 内（`http://localhost`）、本机 `127.0.0.1` 页面或 HTTPS（含云中转）可用；手机浏览器直接访问 `http://局域网IP:8787` 时浏览器不提供录音能力，入口隐藏而不是点了没反应，主机未启用该 bundle 时同样静默隐藏。Android 首次录音会请求麦克风权限，拒绝后需在系统设置中允许；录音只在页面可见时进行，切到后台会停止并按已录内容转写。
 
+「更多 → 偏好与维护 → 语音输入」是识别设置入口，语音内联条右侧的齿轮也可打开同一弹层：可以在主机提供的识别模型之间切换、选择识别语言，并编辑术语纠错表（每行 `错误=正确`，转写后按整词、大小写不敏感替换，保存在本机浏览器存储）。选择会写入主机的语音偏好，对所有已配对客户端生效；纠错表只影响当前设备。
+
+识别模型由主机插件提供，缺省是官方 SenseVoice（中文优先，中英混说时短英文词容易错）。本仓库插件还会注册一个本地 Whisper provider（`whisper-local`，`large-v3-turbo` q5 量化，约 547 MB）：需要主机先装 whisper.cpp 命令行（macOS `brew install whisper-cpp`，或把可执行文件路径写进 `DSH_REMOTE_WHISPER_BIN`；未安装时该模型显示为不可用并给出提示），模型缓存位于 `$DSH_HOME/speech-to-text/whisper/models/`，首次「下载并准备」会从 huggingface/hf-mirror 拉取并校验 SHA-256。Whisper 在中英混说时对英文术语（config、logs、deployment 等）明显更准，代价是更占内存、推理更慢，低配主机建议保留 SenseVoice。
+
 ## 文件与图片
 
 手机和桌面网页的文件页均有“文件收件箱”，当前对话的待接收文件也可在上方叠放卡片中处理。DSH 可通过 `remote_devices`、`remote_send_file`、`remote_file_status` 向指定设备投递单个文件，经用户确认后接收。单文件最多 50 MiB，离线任务保留 24 小时；Android 等待系统下载回执，浏览器只报告保存交接。使用方法、状态与第一版限制见[文件投递说明](file-inbox.md)。

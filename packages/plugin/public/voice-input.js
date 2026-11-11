@@ -86,6 +86,91 @@
     }
     return caret
   }
+
+  /* ---- 语音设置：术语纠错表 / 识别模型与语言（纯逻辑，弹层只做展示与派发） ---- */
+  // 纠错表保存在本机各自一份，格式每行「错误=正确」；从未保存过时才回落到默认条目。
+  const CORRECTIONS_KEY = 'dsr.voice.corrections'
+  const DEFAULT_CORRECTIONS = ['confit=config', 'servve=server', 'log=logs', 'mcp=MCP'].join('\n')
+  const CORRECTIONS_MAX_ENTRIES = 200
+  const USABLE_PHASES = ['ready', 'standby', 'waking']
+  const IDLE_PHASES = ['', 'unprepared', 'cancelled', 'failed']
+
+  function phaseUsable(phase) { return USABLE_PHASES.indexOf(String(phase || '')) >= 0 }
+
+  // 本地文本原样返回（空字符串表示「不纠错」）；key 不存在才用默认条目。
+  function correctionsText(stored) {
+    return typeof stored === 'string' ? stored : DEFAULT_CORRECTIONS
+  }
+  function escapeRegExp(text) {
+    return String(text == null ? '' : text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+  // 解析纠错表：忽略空行、# 注释、缺少 = 的行、左空与错误/正确完全相同的行；重复的「错误」只留第一条。
+  // 返回按「错误」长度降序的表，长词先替换，避免短词先把长词切碎。
+  function parseCorrections(text) {
+    const entries = []
+    const seen = new Set()
+    for (const raw of String(text == null ? '' : text).split(/\r?\n/)) {
+      if (entries.length >= CORRECTIONS_MAX_ENTRIES) break
+      const line = raw.trim()
+      if (!line || line.charAt(0) === '#') continue
+      const at = line.indexOf('=')
+      if (at <= 0) continue
+      const from = line.slice(0, at).trim()
+      const to = line.slice(at + 1).trim()
+      if (!from || from === to) continue
+      const key = from.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      entries.push({ from, to })
+    }
+    entries.sort((left, right) => right.from.length - left.from.length)
+    return entries
+  }
+  // 应用纠错表：大小写不敏感、整词匹配（ASCII 单词字符两侧不成词），替换文本保留目标原文。
+  // 不用 lookbehind，兼容旧版 iOS Safari；行首行尾算边界，中文相邻文字也算边界。
+  function applyCorrections(text, table) {
+    let value = String(text == null ? '' : text)
+    const entries = Array.isArray(table) ? table : parseCorrections(table)
+    for (const entry of entries) {
+      if (!entry || !entry.from) continue
+      let pattern = null
+      try {
+        pattern = new RegExp('(^|[^A-Za-z0-9_])(' + escapeRegExp(entry.from) + ')(?![A-Za-z0-9_])', 'gi')
+      } catch (_) { continue }
+      value = value.replace(pattern, (match, lead, hit) => lead + entry.to)
+    }
+    return value
+  }
+  // speech.configure 的 payload 形状固定为 {patch:{providerId}} 或 {patch:{language}}。
+  function configureProviderPatch(providerId) {
+    const id = String(providerId == null ? '' : providerId).trim()
+    return id ? { patch: { providerId: id } } : null
+  }
+  function configureLanguagePatch(language) {
+    const code = String(language == null ? '' : language).trim()
+    return code ? { patch: { language: code } } : null
+  }
+  // 语言候选：provider 自带列表去重，auto（跟随识别/主机默认）固定排第一。
+  function voiceLanguages(provider) {
+    const out = []
+    const list = Array.isArray(provider && provider.languages) ? provider.languages : []
+    for (const item of list) {
+      const code = typeof item === 'string' ? item.trim() : ''
+      if (code && code !== 'auto' && out.indexOf(code) < 0) out.push(code)
+    }
+    return ['auto'].concat(out)
+  }
+  // 弹层展示用的准备状态：ready 可用 / busy 下载或加载中 / percent 进度 / failed 失败。
+  function providerStatus(provider) {
+    const preparation = (provider && provider.preparation) || {}
+    const phase = String(preparation.phase || '')
+    const total = Number(preparation.totalBytes)
+    const completed = Number(preparation.completedBytes)
+    const percent = Number.isFinite(total) && total > 0 && Number.isFinite(completed)
+      ? Math.max(0, Math.min(100, Math.floor(completed / total * 100))) : null
+    const ready = phaseUsable(phase)
+    return { phase, ready, busy: !ready && IDLE_PHASES.indexOf(phase) < 0, failed: phase === 'failed', percent }
+  }
   /* <<< 纯函数区 */
 
   const DEFAULT_MAX_DURATION_SECONDS = 120
@@ -94,7 +179,6 @@
   const PREPARE_BACKOFF_MS = 5000
   const PREPARE_MAX_MS = 30 * 60 * 1000
   const PREPARE_RETRY_DELAYS = [5000, 20000, 60000]
-  const USABLE_PHASES = ['ready', 'standby', 'waking']
 
   let host = null
   let catalog = null
@@ -110,6 +194,12 @@
   let pollTimer = null
   let pollStartedAt = 0
   let hideBarTimer = null
+  let settingsEls = null
+  let settingsOpen = false
+  let settingsLoading = false
+  let settingsBusy = false
+  let settingsError = ''
+  let settingsStamp = 0
   const ABORTED = { voiceAbort: true }
 
   function t(key, vars) {
@@ -153,7 +243,6 @@
     if (!catalog) return null
     return providerById(catalog.providerId) || catalog.providers[0] || null
   }
-  function phaseUsable(phase) { return USABLE_PHASES.indexOf(String(phase || '')) >= 0 }
   function canCaptureAudio() {
     const navigatorRef = root.navigator || {}
     const media = !!(navigatorRef.mediaDevices && typeof navigatorRef.mediaDevices.getUserMedia === 'function')
@@ -189,6 +278,8 @@
       catalogState = 'ok'
       probeFailures = 0
       renderMic()
+      // 弹层开着时用最新 catalog 重渲染（不含 selection 的本地猜测）
+      if (settingsOpen) renderSettings()
       return catalog
     } catch (error) {
       if (stamp !== probeStamp) return catalog
@@ -256,11 +347,19 @@
     action.className = 'voice-input-action hidden'
     action.type = 'button'
     action.addEventListener('click', () => { if (typeof barAction === 'function') void barAction() })
+    // 齿轮：录音/转写以外的状态都能打开语音设置（识别模型/语言/术语纠错）
+    const gear = document.createElement('button')
+    gear.id = 'voice-input-settings'
+    gear.className = 'voice-input-settings hidden'
+    gear.type = 'button'
+    gear.textContent = '⚙'
+    gear.addEventListener('click', () => { openSettings() })
     bar.appendChild(dot)
     bar.appendChild(text)
     bar.appendChild(action)
+    bar.appendChild(gear)
     wrap.insertBefore(bar, composer)
-    barEls = { bar, dot, text, action }
+    barEls = { bar, dot, text, action, gear }
     return barEls
   }
 
@@ -281,6 +380,12 @@
       ui.action.textContent = ''
       ui.action.classList.add('hidden')
     }
+    // 录音与转写期间不需要改设置，隐藏齿轮
+    const hideSettings = settings.hideSettings === true || settings.recording === true || mode === 'transcribing' || mode === 'starting'
+    if (ui.gear) {
+      ui.gear.classList.toggle('hidden', hideSettings)
+      ui.gear.setAttribute('aria-label', t('voice.settings.title'))
+    }
     ui.bar.classList.remove('hidden')
   }
 
@@ -293,6 +398,7 @@
       barEls.bar.classList.remove('recording', 'error')
       barEls.text.textContent = ''
       barEls.action.classList.add('hidden')
+      if (barEls.gear) barEls.gear.classList.add('hidden')
     }
   }
 
@@ -532,9 +638,12 @@
     }, 180000)
     const text = String(result && result.text != null ? result.text : '').trim()
     if (!text) { toast(t('voice.empty'), 'err'); throw ABORTED }
+    // 术语纠错在插入前应用：大小写不敏感整词替换，坏行忽略；替换后为空按「没识别到」处理
+    const corrected = applyCorrections(text, parseCorrections(savedCorrections()))
+    if (!corrected.trim()) { toast(t('voice.empty'), 'err'); throw ABORTED }
     // 转写期间切换了服务器：文本不属于当前草稿，丢弃而不是插入
     if (connectionId() !== connectionAtStart) throw ABORTED
-    insertTranscript(text)
+    insertTranscript(corrected)
   }
 
   // 只插入文本，不自动发送：保留原有内容与焦点，派发 input 让发送按钮状态刷新。
@@ -596,6 +705,7 @@
       mode = 'idle'
       renderMic()
       handlePrepareError(error)
+      if (settingsOpen) renderSettings()
       return
     }
     startPreparationPolling()
@@ -642,6 +752,8 @@
     catalog = normalizeCatalog(next)
     const provider = providerById(prepareProviderId) || selectedProvider()
     const status = paintPreparation(provider)
+    // 弹层里的进度/状态跟内联条同步刷新
+    if (settingsOpen) renderSettings()
     if (status === 'ready') { mode = 'idle'; renderMic(); hideBarLater(2600); return }
     if (status === 'failed' || status === 'cancelled') { mode = 'idle'; renderMic(); return }
     schedulePreparationPoll(PREPARE_POLL_MS)
@@ -687,12 +799,310 @@
     mode = 'idle'
     renderMic()
     setBar(t('voice.notReady'), providerId ? { action: beginPreparation, actionLabel: t('voice.prepare') } : {})
+    if (settingsOpen) renderSettings()
     if (!providerId) return
     try {
       await host.rpc('speech.cancelPreparation', { providerId }, 30000)
     } catch (error) {
       if (messageOf(error) === 'AUTH' && host.authFailure) host.authFailure()
     }
+  }
+
+  /* ---------------- 语音设置弹层（识别模型 / 识别语言 / 术语纠错） ----------------
+   * 入口两条：更多页「语音输入」行与内联条齿轮，都调 openSettings()。
+   * 弹层只是 catalog 的视图：configure 成功后才更新本地选中态，失败 toast 并回滚。 */
+  function storageRead(key) {
+    try {
+      const store = root.localStorage
+      return store && typeof store.getItem === 'function' ? store.getItem(key) : null
+    } catch (_) { return null }
+  }
+  function storageWrite(key, value) {
+    try {
+      const store = root.localStorage
+      if (store && typeof store.setItem === 'function') store.setItem(key, String(value))
+    } catch (_) {}
+  }
+  function savedCorrections() { return correctionsText(storageRead(CORRECTIONS_KEY)) }
+
+  function nodeOf(tag, className, text) {
+    const node = document.createElement(tag)
+    if (className) node.className = className
+    if (text != null) node.textContent = text
+    return node
+  }
+
+  function ensureSettings() {
+    if (settingsEls && settingsEls.overlay && settingsEls.overlay.isConnected) return settingsEls
+    if (typeof document === 'undefined' || !document.body) return null
+    const overlay = nodeOf('div', 'voice-settings hidden')
+    overlay.id = 'voice-settings'
+    overlay.setAttribute('role', 'dialog')
+    overlay.setAttribute('aria-modal', 'true')
+    overlay.setAttribute('aria-labelledby', 'voice-settings-title')
+    // 点遮罩关闭；面板内部点击不冒泡关闭；Esc 同样关闭
+    overlay.addEventListener('click', event => { if (event && event.target === overlay) closeSettings() })
+    overlay.addEventListener('keydown', event => { if (event && event.key === 'Escape') closeSettings() })
+    const sheet = nodeOf('div', 'voice-settings-sheet')
+    const head = nodeOf('div', 'voice-settings-head')
+    const title = nodeOf('h2')
+    title.id = 'voice-settings-title'
+    const close = nodeOf('button', 'voice-settings-close', '×')
+    close.id = 'voice-settings-close'
+    close.type = 'button'
+    close.addEventListener('click', () => closeSettings())
+    head.appendChild(title)
+    head.appendChild(close)
+
+    const body = nodeOf('div', 'voice-settings-body')
+    const status = nodeOf('p', 'voice-settings-status')
+    status.id = 'voice-settings-status'
+    status.setAttribute('role', 'status')
+    status.setAttribute('aria-live', 'polite')
+
+    // ① 识别模型：列出 catalog.providers 与准备状态，选中即 speech.configure
+    const modelSection = nodeOf('section', 'voice-settings-section')
+    const modelTitle = nodeOf('h3', 'voice-settings-section-title')
+    const modelHint = nodeOf('p', 'voice-settings-hint')
+    const modelList = nodeOf('div', 'voice-settings-options')
+    modelList.id = 'voice-settings-models'
+    modelList.setAttribute('role', 'radiogroup')
+    const prepare = nodeOf('button', 'voice-settings-primary hidden')
+    prepare.id = 'voice-settings-prepare'
+    prepare.type = 'button'
+    prepare.addEventListener('click', () => { void toggleSettingsPrepare() })
+    modelSection.appendChild(modelTitle)
+    modelSection.appendChild(modelHint)
+    modelSection.appendChild(modelList)
+    modelSection.appendChild(prepare)
+
+    // ② 识别语言：候选取所选 provider 的 languages（含 auto）
+    const langSection = nodeOf('section', 'voice-settings-section')
+    const langTitle = nodeOf('h3', 'voice-settings-section-title')
+    const langHint = nodeOf('p', 'voice-settings-hint')
+    const langSelect = nodeOf('select', 'voice-settings-select')
+    langSelect.id = 'voice-settings-language'
+    langSelect.addEventListener('change', () => { void chooseLanguage(langSelect.value) })
+    langSection.appendChild(langTitle)
+    langSection.appendChild(langHint)
+    langSection.appendChild(langSelect)
+
+    // ③ 术语纠错：每行「错误=正确」，本机保存，转写后整词替换
+    const correctionSection = nodeOf('section', 'voice-settings-section')
+    const correctionTitle = nodeOf('h3', 'voice-settings-section-title')
+    const correctionHint = nodeOf('p', 'voice-settings-hint')
+    const correctionText = nodeOf('textarea', 'voice-settings-textarea')
+    correctionText.id = 'voice-settings-corrections'
+    correctionText.rows = 6
+    correctionText.spellcheck = false
+    correctionText.addEventListener('input', () => {
+      storageWrite(CORRECTIONS_KEY, correctionText.value)
+      correctionStatus.textContent = t('voice.correction.saved', { count: parseCorrections(correctionText.value).length })
+    })
+    const correctionReset = nodeOf('button', 'voice-settings-secondary')
+    correctionReset.id = 'voice-settings-corrections-reset'
+    correctionReset.type = 'button'
+    correctionReset.addEventListener('click', () => {
+      correctionText.value = DEFAULT_CORRECTIONS
+      storageWrite(CORRECTIONS_KEY, DEFAULT_CORRECTIONS)
+      correctionStatus.textContent = t('voice.correction.saved', { count: parseCorrections(DEFAULT_CORRECTIONS).length })
+    })
+    const correctionStatus = nodeOf('p', 'voice-settings-hint')
+    correctionStatus.id = 'voice-settings-corrections-status'
+    correctionStatus.setAttribute('role', 'status')
+    correctionStatus.setAttribute('aria-live', 'polite')
+    correctionSection.appendChild(correctionTitle)
+    correctionSection.appendChild(correctionHint)
+    correctionSection.appendChild(correctionText)
+    correctionSection.appendChild(correctionReset)
+    correctionSection.appendChild(correctionStatus)
+
+    body.appendChild(status)
+    body.appendChild(modelSection)
+    body.appendChild(langSection)
+    body.appendChild(correctionSection)
+    sheet.appendChild(head)
+    sheet.appendChild(body)
+    overlay.appendChild(sheet)
+    document.body.appendChild(overlay)
+    settingsEls = {
+      overlay, sheet, title, close, status,
+      modelTitle, modelHint, modelList, prepare,
+      langTitle, langHint, langSelect,
+      correctionTitle, correctionHint, correctionText, correctionReset, correctionStatus
+    }
+    return settingsEls
+  }
+
+  function modelStatusLabel(state) {
+    if (state.ready) return t('voice.model.ready')
+    if (state.failed) return t('voice.model.failed')
+    if (state.busy) return state.percent == null ? t('voice.model.preparing') : t('voice.model.downloading', { percent: state.percent })
+    return t('voice.model.notReady')
+  }
+
+  // 用当前 catalog 渲染：打开弹层与每次轮询后都走这里，选中态只认 catalog.selection
+  function renderSettings() {
+    const ui = settingsEls
+    if (!ui) return
+    ui.title.textContent = t('voice.settings.title')
+    ui.close.setAttribute('aria-label', t('voice.settings.close'))
+    ui.modelTitle.textContent = t('voice.model.title')
+    ui.modelHint.textContent = t('voice.model.hint')
+    ui.langTitle.textContent = t('voice.lang.title')
+    ui.langHint.textContent = t('voice.lang.hint')
+    ui.correctionTitle.textContent = t('voice.correction.title')
+    ui.correctionHint.textContent = t('voice.correction.hint')
+    ui.correctionReset.textContent = t('voice.correction.reset')
+    ui.status.textContent = settingsLoading ? t('voice.settings.loading') : settingsError
+
+    const providers = catalog && Array.isArray(catalog.providers) ? catalog.providers : []
+    ui.modelList.replaceChildren()
+    let selected = null
+    for (const provider of providers) {
+      const id = String((provider && provider.id) || '')
+      if (!id) continue
+      const state = providerStatus(provider)
+      const chosen = !!catalog && catalog.providerId === id
+      const row = nodeOf('button', 'voice-settings-option' + (chosen ? ' selected' : ''))
+      row.id = 'voice-model-' + id
+      row.type = 'button'
+      row.setAttribute('role', 'radio')
+      row.setAttribute('data-voice-model', id)
+      row.setAttribute('aria-checked', chosen ? 'true' : 'false')
+      row.appendChild(nodeOf('span', 'voice-settings-option-name', String(provider.name || id)))
+      row.appendChild(nodeOf('span', 'voice-settings-option-state' + (state.ready ? ' ready' : state.failed ? ' failed' : ''), modelStatusLabel(state)))
+      row.addEventListener('click', () => { void chooseProvider(id) })
+      ui.modelList.appendChild(row)
+      if (chosen) selected = { provider, state }
+    }
+    if (!providers.length) ui.modelList.appendChild(nodeOf('p', 'voice-settings-empty', t('voice.model.empty')))
+
+    // 所选 provider 未就绪：弹层里直接「下载并准备」，复用内联条的 prepare 轮询
+    const needsPrepare = !!selected && !selected.state.ready
+    if (needsPrepare) {
+      const busy = selected.state.busy || mode === 'preparing'
+      ui.prepare.textContent = busy ? t('voice.cancel') : t('voice.model.prepare')
+      ui.prepare.disabled = settingsBusy
+      ui.prepare.classList.remove('hidden')
+    } else {
+      ui.prepare.textContent = ''
+      ui.prepare.disabled = false
+      ui.prepare.classList.add('hidden')
+    }
+
+    const provider = selected ? selected.provider : selectedProvider()
+    const languages = voiceLanguages(provider)
+    ui.langSelect.replaceChildren()
+    for (const code of languages) {
+      const option = nodeOf('option', '', code === 'auto' ? t('voice.lang.auto') : code)
+      option.value = code
+      ui.langSelect.appendChild(option)
+    }
+    const current = catalog && catalog.language ? catalog.language : 'auto'
+    ui.langSelect.value = languages.indexOf(current) >= 0 ? current : languages[0]
+    ui.langSelect.disabled = !languages.length
+  }
+
+  async function refreshSettings() {
+    const stamp = ++settingsStamp
+    if (!host || typeof host.rpc !== 'function') {
+      settingsError = t('voice.unavailable')
+      if (settingsOpen) renderSettings()
+      return
+    }
+    settingsLoading = true
+    settingsError = ''
+    renderSettings()
+    try {
+      const value = await host.rpc('speech.catalog', {}, 15000)
+      if (stamp !== settingsStamp) return
+      catalog = normalizeCatalog(value)
+      catalogState = 'ok'
+      renderMic()
+    } catch (error) {
+      if (stamp !== settingsStamp) return
+      settingsError = t('voice.settings.loadFailed', { msg: reasonOf(error) || t('err.dshError') })
+    } finally {
+      if (stamp === settingsStamp) {
+        settingsLoading = false
+        if (settingsOpen) renderSettings()
+      }
+    }
+  }
+
+  // 选中指定 provider：先 configure，成功才改本地 catalog，失败 toast 并保持原选中态。
+  async function chooseProvider(providerId) {
+    const payload = configureProviderPatch(providerId)
+    if (!payload || !catalog || settingsBusy) return
+    if (catalog.providerId === payload.patch.providerId) { renderSettings(); return }
+    const previous = catalog.providerId
+    settingsBusy = true
+    try {
+      await host.rpc('speech.configure', payload, 20000)
+      if (catalog) catalog.providerId = payload.patch.providerId
+      // 语言候选随 provider 变化，用主机最新 catalog 覆盖本地选择
+      void probeCatalog()
+      if (settingsOpen) renderSettings()
+    } catch (error) {
+      if (catalog) catalog.providerId = previous
+      toast(t('voice.model.selectFailed', { msg: reasonOf(error) || t('err.dshError') }), 'err')
+      if (settingsOpen) renderSettings()
+    } finally {
+      settingsBusy = false
+      renderMic()
+    }
+  }
+
+  // 识别语言：payload 固定 {patch:{language}}
+  async function chooseLanguage(language) {
+    const payload = configureLanguagePatch(language)
+    if (!payload || !catalog) return
+    if (catalog.language === payload.patch.language) { renderSettings(); return }
+    const previous = catalog.language
+    try {
+      await host.rpc('speech.configure', payload, 20000)
+      if (catalog) catalog.language = payload.patch.language
+    } catch (error) {
+      if (catalog) catalog.language = previous
+      toast(t('voice.lang.selectFailed', { msg: reasonOf(error) || t('err.dshError') }), 'err')
+    }
+    if (settingsOpen) renderSettings()
+  }
+
+  // 弹层里的「下载并准备 / 取消」：与内联条共用 beginPreparation + 轮询
+  async function toggleSettingsPrepare() {
+    const provider = selectedProvider()
+    if (!provider || !provider.id || settingsBusy) return
+    const state = providerStatus(provider)
+    if (state.busy || mode === 'preparing') {
+      await cancelPreparation()
+    } else {
+      prepareProviderId = provider.id
+      await beginPreparation()
+    }
+    if (settingsOpen) renderSettings()
+  }
+
+  function openSettings() {
+    const ui = ensureSettings()
+    if (!ui) return false
+    settingsOpen = true
+    settingsError = ''
+    ui.overlay.classList.remove('hidden')
+    ui.correctionText.value = savedCorrections()
+    ui.correctionStatus.textContent = t('voice.correction.saved', { count: parseCorrections(ui.correctionText.value).length })
+    renderSettings()
+    try { if (typeof ui.close.focus === 'function') ui.close.focus() } catch (_) {}
+    void refreshSettings()
+    return true
+  }
+
+  function closeSettings() {
+    settingsOpen = false
+    settingsStamp++
+    settingsLoading = false
+    if (settingsEls && settingsEls.overlay) settingsEls.overlay.classList.add('hidden')
   }
 
   /* ---------------- 挂载 / 连接切换 ---------------- */
@@ -729,11 +1139,13 @@
     mode = 'idle'
     hideBar()
     renderMic()
+    // 弹层开着时换成空 catalog，等新连接的 probeCatalog 回来再重渲染
+    if (settingsOpen) renderSettings()
     if (!host || (host.token && !host.token())) return
     void probeCatalog()
   }
 
-  const api = { encodeWav, toBase64, decodeBase64, shouldShowMic, insertAtCursor, mount, reset }
+  const api = { encodeWav, toBase64, decodeBase64, shouldShowMic, insertAtCursor, mount, reset, openSettings, closeSettings }
   if (typeof module !== 'undefined' && module.exports) module.exports = api
   else root.DshVoiceInput = api
 })(typeof window === 'undefined' ? globalThis : window)

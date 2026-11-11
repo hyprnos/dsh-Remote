@@ -24,6 +24,7 @@ import { serveSessionFile } from './session-file.mjs'
 import { createSkillsAdapter } from './skills.mjs'
 import { registerDoctorSkill } from './doctor-skill.mjs'
 import { readDoctorTarget, watchDoctorWorkspaces } from './doctor-target.mjs'
+import { registerWhisperProvider } from './speech-whisper.mjs'
 
 export const name = 'dsh-remote'
 export const inject = ['webServer', 'commands', 'agents', 'connection']
@@ -1757,6 +1758,9 @@ export function apply(ctx) {
   // Optional on older DSH: register the packaged read-only doctor skill when
   // the host exposes a skill registry. Failure never blocks the plugin.
   registerDoctorSkill(ctx)
+  // 可选能力: 主机启用官方 voice-input bundle 时再登记本地 Whisper 转写 provider。
+  // 走 cordis 动态注入, 没有 speechToText 服务时回调不会执行, 插件照常启动。
+  try { registerWhisperProvider(ctx) } catch (error) { logGateway('无法登记本地 Whisper 语音 provider: ' + error.message) }
   registerFileDeliveryTools(ctx, { gatewayBase, gatewayToken })
   watchDoctorWorkspaces(ctx)
   ctx.effect(() => ctx.webServer.register({

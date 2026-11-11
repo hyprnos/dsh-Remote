@@ -20,7 +20,9 @@ function load() {
     btoa: value => Buffer.from(value, 'binary').toString('base64'),
     atob: value => Buffer.from(value, 'base64').toString('binary')
   })
-  vm.runInContext(code + ';this.api={encodeWav,toBase64,decodeBase64,shouldShowMic,insertAtCursor};', context)
+  vm.runInContext(code + ';this.api={encodeWav,toBase64,decodeBase64,shouldShowMic,insertAtCursor,' +
+    'CORRECTIONS_KEY,DEFAULT_CORRECTIONS,correctionsText,parseCorrections,applyCorrections,' +
+    'configureProviderPatch,configureLanguagePatch,voiceLanguages,providerStatus};', context)
   return context.api
 }
 const bytesOf = view => Buffer.from(Array.from(view))
@@ -124,13 +126,117 @@ test('光标插入：保留原有内容、只在光标处插入并返回新光�
   assert.equal(api.insertAtCursor(null, 'x'), 0)
 })
 
+test('纠错表解析：忽略坏行/注释、去重、按「错误」长度降序（长词先替换）', () => {
+  const api = load()
+  const table = api.parseCorrections([
+    '# 注释行',
+    '',
+    'claude=Claude',
+    'claude code = Claude Code ',
+    '没有等号的行',
+    '=只有右边',
+    '   ',
+    'same=same',
+    'CONFIG=config',
+    'config=重复行丢掉',
+    'servve=server',
+    'crlf=ok\r'
+  ].join('\n'))
+  // 跨 realm 的数组用宿主侧 Array.from 取出再比较
+  assert.deepEqual(Array.from(table, item => item.from), ['claude code', 'claude', 'CONFIG', 'servve', 'crlf'])
+  const byFrom = Object.fromEntries(Array.from(table, item => [item.from, item.to]))
+  assert.equal(byFrom['claude code'], 'Claude Code', '两端空白应裁掉')
+  assert.equal(byFrom.CONFIG, 'config', '重复「错误」只留第一条')
+  assert.equal(byFrom.crlf, 'ok', 'CRLF 行尾应裁掉')
+
+  assert.equal(Array.from(api.parseCorrections('')).length, 0)
+  assert.equal(Array.from(api.parseCorrections(null)).length, 0)
+  assert.equal(Array.from(api.parseCorrections('没有等号\n=x\nsame=same')).length, 0, '全是坏行时为空表')
+})
+
+test('纠错表应用：大小写不敏感、整词替换、保留替换目标原文、长词优先', () => {
+  const api = load()
+  const table = api.parseCorrections('confit=config\nservve=server\nclaude code=Claude Code\nclaude=Claude\nmcp=MCP')
+  assert.equal(api.applyCorrections('Confit is CONFIT on servve', table), 'config is config on server')
+  assert.equal(api.applyCorrections('请用 claude code，而不是 CLAUDE CODE', table), '请用 Claude Code，而不是 Claude Code',
+    '长词优先：不会被短词切成 Claude code')
+  assert.equal(api.applyCorrections('mcp 和 mcp_servers 与 confitx 与 configs', table), 'MCP 和 mcp_servers 与 confitx 与 configs',
+    '整词匹配：词内与下划线连接的不替换')
+  assert.equal(api.applyCorrections('servve,servve servve', table), 'server,server server', '相邻重复都要替换')
+  assert.equal(api.applyCorrections('保持原文', api.parseCorrections('x y\n=bad\n')), '保持原文', '坏行不生效')
+  assert.equal(api.applyCorrections('', table), '')
+  assert.equal(api.applyCorrections(null, table), '')
+})
+
+test('术语纠错的存储键与默认条目：从未保存才用默认值，空字符串表示不纠错', () => {
+  const api = load()
+  assert.equal(api.CORRECTIONS_KEY, 'dsr.voice.corrections')
+  assert.equal(api.correctionsText(undefined), api.DEFAULT_CORRECTIONS)
+  assert.equal(api.correctionsText(null), api.DEFAULT_CORRECTIONS)
+  assert.equal(api.correctionsText(''), '')
+  assert.equal(api.correctionsText('a=b'), 'a=b')
+  const defaults = api.parseCorrections(api.DEFAULT_CORRECTIONS)
+  const byFrom = Object.fromEntries(Array.from(defaults, item => [item.from, item.to]))
+  assert.equal(byFrom.confit, 'config')
+  assert.equal(byFrom.servve, 'server')
+  assert.equal(byFrom.log, 'logs')
+  assert.equal(api.applyCorrections('看下 log 和 confit', defaults), '看下 logs 和 config')
+})
+
+test('speech.configure 的 payload 形状：providerId 与 language 都包在 patch 里', () => {
+  const api = load()
+  assert.equal(JSON.stringify(api.configureProviderPatch('whisper-local')), '{"patch":{"providerId":"whisper-local"}}')
+  assert.equal(JSON.stringify(api.configureLanguagePatch('zh')), '{"patch":{"language":"zh"}}')
+  assert.equal(JSON.stringify(api.configureProviderPatch(' whisper-local ')), '{"patch":{"providerId":"whisper-local"}}')
+  assert.equal(api.configureProviderPatch(''), null)
+  assert.equal(api.configureProviderPatch(null), null)
+  assert.equal(api.configureLanguagePatch(''), null)
+  assert.equal(api.configureLanguagePatch(undefined), null)
+})
+
+test('语言候选含 auto 且去重，准备状态映射到「已就绪/未下载/下载中 x%」', () => {
+  const api = load()
+  assert.equal(JSON.stringify(api.voiceLanguages({ languages: ['zh', 'en', 'zh', '', 'auto'] })), '["auto","zh","en"]')
+  assert.equal(JSON.stringify(api.voiceLanguages({})), '["auto"]')
+  assert.equal(JSON.stringify(api.voiceLanguages(null)), '["auto"]')
+  const busy = api.providerStatus({ preparation: { phase: 'downloading', completedBytes: 1, totalBytes: 4 } })
+  assert.equal(JSON.stringify(busy), '{"phase":"downloading","ready":false,"busy":true,"failed":false,"percent":25}')
+  assert.equal(api.providerStatus({ preparation: { phase: 'ready' } }).ready, true)
+  assert.equal(api.providerStatus({ preparation: { phase: 'standby' } }).busy, false)
+  assert.equal(api.providerStatus({ preparation: { phase: 'failed' } }).failed, true)
+  assert.equal(api.providerStatus({}).busy, false)
+  assert.equal(api.providerStatus({ preparation: { phase: 'downloading' } }).percent, null)
+})
+
+test('新语音文案 zh/en 双语齐全（index.html 内联 APP_STR）', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8')
+  const zhAt = html.indexOf('window.APP_STR')
+  const enAt = html.indexOf('en: {', zhAt)
+  assert.ok(zhAt >= 0 && enAt > zhAt, 'index.html 的 APP_STR 结构变了')
+  const zh = html.slice(zhAt, enAt), en = html.slice(enAt)
+  const keys = new Set()
+  for (const match of source.matchAll(/\bt\('(voice\.[A-Za-z0-9_.]+)'/g)) keys.add(match[1])
+  assert.ok(keys.size >= 35, '应收集到语音相关 key，实际 ' + keys.size)
+  const missing = []
+  for (const key of keys) {
+    if (!zh.includes("'" + key + "'")) missing.push(key + '（zh）')
+    if (!en.includes("'" + key + "'")) missing.push(key + '（en）')
+  }
+  assert.deepEqual(missing, [])
+  for (const prefix of ['voice.settings.', 'voice.model.', 'voice.lang.', 'voice.correction.']) {
+    const count = block => (block.match(new RegExp("'" + prefix.replace(/\./g, '\\.') + "[A-Za-z0-9_.]*'", 'g')) || []).length
+    assert.ok(count(zh) >= 3, prefix + ' 中文条目太少')
+    assert.equal(count(zh), count(en), prefix + ' 中英文条目数量不一致')
+  }
+})
+
 /* ---------------- 运行时：假 DOM + 假媒体 API ---------------- */
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 function fakeElement(tag) {
   const classes = new Set(), listeners = {}
   const el = {
-    tagName: String(tag || 'div').toUpperCase(), id: '', className: '', value: '', textContent: '', title: '',
+    tagName: String(tag || 'div').toUpperCase(), id: '', value: '', textContent: '', title: '',
     disabled: false, type: '', children: [], selectionStart: 0, selectionEnd: 0, focused: false,
     scrollHeight: 20, scrollTop: 0, isConnected: true,
     classList: {
@@ -151,19 +257,35 @@ function fakeElement(tag) {
     querySelector() { return null },
     focus() { el.focused = true },
     setSelectionRange(from, to) { el.selectionStart = from; el.selectionEnd = to },
-    dispatchEvent(event) { el.events = (el.events || []).concat(event.type); return true }
+    dispatchEvent(event) { el.events = (el.events || []).concat(event.type); return true },
+    replaceChildren(...nodes) { el.children.length = 0; nodes.forEach(child => el.children.push(child)) },
+    remove() { el.removed = true }
   }
+  // className 与 classList 共享同一份集合：prod 代码用 el.className = 'a b' 写类名
+  Object.defineProperty(el, 'className', {
+    get: () => Array.from(classes).join(' '),
+    set: value => {
+      classes.clear()
+      String(value == null ? '' : value).split(/\s+/).filter(Boolean).forEach(name => classes.add(name))
+    }
+  })
   return el
 }
 
 // 假宿主环境：document/navigator/MediaRecorder/AudioContext/OfflineAudioContext + 可控 catalog。
-function runtime() {
+// 选项：storage(Map，模拟 localStorage)、transcribeText、configureFails。
+function runtime(options) {
+  const settings = options || {}
+  const storage = settings.storage || new Map()
+  const transcribeText = settings.transcribeText === undefined ? '你好世界' : settings.transcribeText
+  const configureFails = settings.configureFails === true
   const ids = new Map(['composer-input', 'btn-mic', 'composer-wrap', 'toast'].map(id => [id, fakeElement('div')]))
   const composerRow = fakeElement('div')
   const wrap = ids.get('composer-wrap')
   wrap.querySelector = selector => (selector === '.composer' ? composerRow : null)
   const document = {
     hidden: false,
+    body: fakeElement('body'),
     getElementById: id => ids.get(id) || null,
     createElement: tag => fakeElement(tag),
     addEventListener() {}
@@ -197,6 +319,11 @@ function runtime() {
   }
   const context = vm.createContext({
     document, phrase: '',
+    localStorage: {
+      getItem: key => (storage.has(key) ? storage.get(key) : null),
+      setItem: (key, value) => { storage.set(key, String(value)) },
+      removeItem: key => { storage.delete(key) }
+    },
     navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => tracks }) } },
     MediaRecorder: FakeRecorder, AudioContext: FakeAudioContext, OfflineAudioContext: FakeOfflineAudioContext,
     isSecureContext: true, btoa, atob, Blob, Event, setTimeout, clearTimeout, setInterval, clearInterval
@@ -212,7 +339,16 @@ function runtime() {
         if (catalog === 'unavailable') throw Object.assign(new Error('speech unavailable'), { code: 'speech/unavailable' })
         return catalog
       }
-      if (method === 'speech.transcribe') return { text: '你好世界', audioSeconds: 1.2, inferenceSeconds: 0.3 }
+      if (method === 'speech.configure') {
+        if (configureFails) throw new Error('configure rejected')
+        const patch = (payload && payload.patch) || {}
+        if (catalog && typeof catalog === 'object' && catalog.selection) {
+          if (patch.providerId) catalog.selection.providerId = patch.providerId
+          if (patch.language) catalog.selection.language = patch.language
+        }
+        return { selection: patch }
+      }
+      if (method === 'speech.transcribe') return { text: transcribeText, audioSeconds: 1.2, inferenceSeconds: 0.3 }
       return null
     },
     token: () => 'token', server: () => 'http://gateway',
@@ -223,7 +359,7 @@ function runtime() {
     autosize() {}
   }
   return {
-    context, host, calls, notices,
+    context, host, calls, notices, storage,
     api: context.DshVoiceInput,
     setCatalog: value => { catalog = value },
     mic: () => ids.get('btn-mic'),
@@ -232,9 +368,35 @@ function runtime() {
     bar: () => wrap.children.find(child => child.id === 'voice-input-bar'),
     barText: () => { const bar = wrap.children.find(child => child.id === 'voice-input-bar'); return bar ? bar.children[1].textContent : '' },
     barAction: () => { const bar = wrap.children.find(child => child.id === 'voice-input-bar'); return bar ? bar.children[2].textContent : '' },
+    overlay: () => document.body.children.find(child => child.id === 'voice-settings') || null,
     readyCatalog: () => ({ maxAudioBytes: 4194304, maxDurationSeconds: 120, providers: [{ id: 'p1', preparation: { phase: 'ready' } }], selection: { providerId: 'p1' } })
   }
 }
+
+// 弹层相关的 DOM 查找/读取工具：fakeElement 只保留 children 数组，按 id/class 递归找。
+const walk = (node, out = []) => {
+  if (!node || typeof node !== 'object') return out
+  out.push(node)
+  for (const child of node.children || []) walk(child, out)
+  return out
+}
+const nodeText = node => {
+  if (!node || typeof node !== 'object') return ''
+  const children = node.children || []
+  return children.length ? children.map(nodeText).join(' ') : String(node.textContent || '')
+}
+const byElementId = (root, id) => walk(root).find(node => node.id === id) || null
+const modelRows = overlay => walk(overlay).filter(node => String(node.className || '').split(/\s+/).includes('voice-settings-option'))
+
+const twoProviderCatalog = () => ({
+  maxAudioBytes: 4194304,
+  maxDurationSeconds: 120,
+  providers: [
+    { id: 'p1', name: 'DSH 云端识别', languages: ['zh', 'en'], preparation: { phase: 'ready' } },
+    { id: 'whisper-local', name: 'Whisper 本地', languages: ['zh', 'en'], preparation: { phase: 'unprepared' } }
+  ],
+  selection: { providerId: 'p1', language: 'auto' }
+})
 
 test('mount 运行时：入口可见性、录音→16k WAV→speech.transcribe→光标插入、取消、模型准备', async () => {
   /* 主机未启用语音 bundle：隐藏入口且不弹错误 */
@@ -327,4 +489,153 @@ test('mount 运行时：入口可见性、录音→16k WAV→speech.transcribe�
   assert.equal(slow.mic().classList.contains('recording'), true, '就绪后可以直接录音')
   slow.mic().fire('click')
   await wait(40)
+})
+test('语音设置弹层：按 catalog 渲染 provider 状态，选择 provider/语言发 speech.configure 的 patch payload', async () => {
+  const h = runtime()
+  h.setCatalog(twoProviderCatalog())
+  h.api.mount(h.host)
+  await wait(5)
+  assert.equal(h.micHidden(), false)
+  assert.equal(h.api.openSettings(), true)
+  await wait(20)
+  const overlay = h.overlay()
+  assert.ok(overlay, '应插入 #voice-settings 弹层')
+  assert.equal(overlay.classList.contains('hidden'), false)
+  assert.equal(h.calls.filter(call => call.method === 'speech.catalog').length, 2, '打开弹层要用最新 catalog 重新渲染')
+
+  const rows = modelRows(overlay)
+  assert.equal(rows.length, 2)
+  assert.match(nodeText(rows[0]), /DSH 云端识别/)
+  assert.match(nodeText(rows[0]), /voice\.model\.ready/)
+  assert.equal(rows[0].classList.contains('selected'), true)
+  assert.match(nodeText(rows[1]), /Whisper 本地/)
+  assert.match(nodeText(rows[1]), /voice\.model\.notReady/)
+  assert.equal(byElementId(overlay, 'voice-settings-prepare').classList.contains('hidden'), true, '就绪的 provider 不显示下载按钮')
+
+  // 选中第二个 provider：configure 成功后才换选中态
+  rows[1].fire('click')
+  await wait(25)
+  const providerCalls = h.calls.filter(call => call.method === 'speech.configure')
+  assert.equal(providerCalls.length, 1)
+  assert.equal(JSON.stringify(providerCalls[0].payload), '{"patch":{"providerId":"whisper-local"}}')
+  assert.equal(providerCalls[0].timeoutMs, 20000)
+  assert.equal(modelRows(overlay)[1].classList.contains('selected'), true, '成功后选中态跟随 catalog.selection')
+  assert.equal(modelRows(overlay)[0].classList.contains('selected'), false)
+  assert.equal(byElementId(overlay, 'voice-settings-prepare').classList.contains('hidden'), false, '未就绪 provider 要显示下载按钮')
+
+  // 识别语言：候选取所选 provider 的 languages（含 auto），变更发 language patch
+  const select = byElementId(overlay, 'voice-settings-language')
+  assert.ok(select, '应有识别语言选择器')
+  assert.deepEqual(select.children.map(option => option.value), ['auto', 'zh', 'en'])
+  assert.equal(select.value, 'auto')
+  select.value = 'zh'
+  select.fire('change')
+  await wait(20)
+  const languageCalls = h.calls.filter(call => call.method === 'speech.configure').slice(1)
+  assert.equal(languageCalls.length, 1)
+  assert.equal(JSON.stringify(languageCalls[0].payload), '{"patch":{"language":"zh"}}')
+  assert.equal(byElementId(overlay, 'voice-settings-language').value, 'zh')
+})
+
+test('语音设置：configure 失败要 toast 且回滚选中态（本地不猜）', async () => {
+  const h = runtime({ configureFails: true })
+  h.setCatalog(twoProviderCatalog())
+  h.api.mount(h.host)
+  await wait(5)
+  h.api.openSettings()
+  await wait(20)
+  const overlay = h.overlay()
+  modelRows(overlay)[1].fire('click')
+  await wait(25)
+  assert.equal(h.calls.filter(call => call.method === 'speech.configure').length, 1, '失败也发出了一次请求')
+  assert.equal(modelRows(overlay)[0].classList.contains('selected'), true, '失败后选中态回到原 provider')
+  assert.equal(modelRows(overlay)[1].classList.contains('selected'), false)
+  assert.equal(h.notices.length, 1)
+  assert.equal(h.notices[0].kind, 'err')
+  assert.match(h.notices[0].text, /^voice\.model\.selectFailed/)
+  assert.match(h.notices[0].text, /configure rejected/)
+})
+
+test('术语纠错：弹层保存到 localStorage dsr.voice.corrections，并在插入前整词纠错', async () => {
+  const h = runtime({ transcribeText: '请检查 confit 和 servve，再看 log' })
+  h.setCatalog(h.readyCatalog())
+  h.api.mount(h.host)
+  await wait(5)
+  h.api.openSettings()
+  await wait(20)
+  const overlay = h.overlay()
+  const area = byElementId(overlay, 'voice-settings-corrections')
+  assert.ok(area, '应有术语纠错输入框')
+  assert.match(area.value, /confit=config/, '首次打开显示默认条目')
+
+  area.value = 'confit=config\nservve=server'
+  area.fire('input')
+  assert.equal(h.storage.get('dsr.voice.corrections'), 'confit=config\nservve=server', '输入即保存到本机键')
+
+  byElementId(overlay, 'voice-settings-close').fire('click')
+  assert.equal(overlay.classList.contains('hidden'), true, '关闭按钮隐藏弹层')
+
+  h.input().value = '前缀'
+  h.input().selectionStart = 2
+  h.input().selectionEnd = 2
+  h.mic().fire('click')
+  await wait(5)
+  h.mic().fire('click')
+  await wait(60)
+  assert.equal(h.input().value, '前缀请检查 config 和 server，再看 log', '转写文本先纠错再插入光标处')
+})
+
+test('内联条齿轮：非录音/转写状态可打开同一弹层，录音中隐藏', async () => {
+  const h = runtime()
+  const catalog = h.readyCatalog()
+  catalog.providers[0].preparation = { phase: 'unprepared' }
+  h.setCatalog(catalog)
+  h.api.mount(h.host)
+  await wait(5)
+  h.mic().fire('click')
+  await wait(5)
+  const bar = h.bar()
+  assert.ok(bar, '未就绪时应显示内联条')
+  const gear = bar.children[3]
+  assert.equal(gear.id, 'voice-input-settings')
+  assert.equal(gear.classList.contains('hidden'), false, '未就绪状态可打开语音设置')
+  gear.fire('click')
+  await wait(20)
+  const overlay = h.overlay()
+  assert.ok(overlay, '齿轮应打开同一弹层')
+  assert.equal(overlay.classList.contains('hidden'), false)
+  overlay.fire('click')
+  assert.equal(overlay.classList.contains('hidden'), true, '点遮罩关闭弹层')
+
+  catalog.providers[0].preparation = { phase: 'ready' }
+  h.mic().fire('click')
+  await wait(5)
+  assert.equal(h.mic().classList.contains('recording'), true)
+  assert.equal(h.bar().children[3].classList.contains('hidden'), true, '录音中不显示齿轮')
+  h.mic().fire('click')
+  await wait(40)
+})
+
+test('弹层内「下载并准备」复用现有 prepare 轮询，可取消', async () => {
+  const h = runtime()
+  const catalog = h.readyCatalog()
+  catalog.providers[0].preparation = { phase: 'unprepared' }
+  h.setCatalog(catalog)
+  h.api.mount(h.host)
+  await wait(5)
+  h.api.openSettings()
+  await wait(20)
+  const overlay = h.overlay()
+  const prepare = byElementId(overlay, 'voice-settings-prepare')
+  assert.equal(prepare.classList.contains('hidden'), false)
+  assert.equal(prepare.textContent, 'voice.model.prepare')
+  prepare.fire('click')
+  await wait(20)
+  assert.equal(JSON.stringify(h.calls.filter(call => call.method === 'speech.prepare').map(call => call.payload)), '[{"providerId":"p1"}]')
+  const afterStart = byElementId(overlay, 'voice-settings-prepare')
+  assert.equal(afterStart.textContent, 'voice.cancel', '准备期间按钮变成取消')
+  afterStart.fire('click')
+  await wait(20)
+  assert.equal(JSON.stringify(h.calls.filter(call => call.method === 'speech.cancelPreparation').map(call => call.payload)), '[{"providerId":"p1"}]')
+  assert.equal(byElementId(overlay, 'voice-settings-prepare').textContent, 'voice.model.prepare')
 })
