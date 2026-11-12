@@ -261,7 +261,12 @@
       const models=button('模型','Model',()=>{content.hidden=false;openModels()});models.id='workflow-models';models.prepend(icon('model'));controls.append(models)
       // The context ring belongs beside the model selector, not between the input and image button.
       const contextRing=$('context-ring');if(contextRing)controls.append(contextRing)
-      $('composer-wrap')?.querySelector('.composer')?.append(controls)
+      // 工具行与发送行分开：指令/模型/用量/图片/麦克风单独一行，
+      // 输入框与「排队发送/插队发送」留在下面一行，避免所有按钮挤在同一行。
+      const tools=element('div','workflow-composer-tools');tools.id='composer-tools'
+      for(const node of [$('btn-plus'),controls,$('btn-image'),$('btn-mic')])if(node)tools.append(node)
+      const composer=$('composer-wrap')?.querySelector('.composer')
+      if(composer&&composer.parentNode)composer.parentNode.insertBefore(tools,composer)
       rename($('btn-plus'),'指令','Commands')
     }
     const send=$('btn-send');if(!send)return

@@ -90,15 +90,18 @@
 .workflow-data-settings > p { flex-basis:100%; margin:0 0 8px; line-height:1.6; overflow-wrap:anywhere; }
 .workflow-v8 .composer-wrap { border-top:1px solid var(--dsr-divider); box-shadow:none; background:var(--dsr-bg); }
 .workflow-v8 .composer-wrap:not(.fs) { display:flex; flex-direction:column; left:8px; right:8px; bottom:calc(8px + var(--dsr-safe-b)); border:1px solid var(--dsr-divider); border-radius:24px; background:var(--dsr-panel); box-shadow:0 6px 22px var(--dsr-shadow); }
-.workflow-v8 .composer-wrap:not(.fs) .composer { display:grid; grid-template-columns:44px minmax(0,1fr) 44px auto; gap:4px; padding:8px; align-items:center; }
+.workflow-v8 .composer-wrap:not(.fs) .composer { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:6px; padding:0 8px 8px; align-items:center; }
 .workflow-v8 .composer-wrap:not(.fs) .composer-input-wrap { grid-column:1/-1; grid-row:1; }
-.workflow-v8 .composer-wrap:not(.fs) .composer :is(.plus-btn,.composer-image-btn,.send-btn,.workflow-composer-config,.workflow-steer) { grid-row:2; }
-.workflow-v8 .composer-wrap:not(.fs) .plus-btn { grid-column:1; }
-.workflow-v8 .composer-wrap:not(.fs) .workflow-composer-config { grid-column:2; }
-.workflow-v8 .composer-wrap:not(.fs) .composer-image-btn { grid-column:3; }
-.workflow-v8 .composer-wrap:not(.fs) .send-btn { grid-column:4; }
-.workflow-v8 .composer-wrap:not(.fs) .workflow-steer { grid-column:5; }
-.workflow-v8 .composer-wrap:not(.fs) .composer:has(.workflow-steer:not([hidden])) { grid-template-columns:44px minmax(0,1fr) 40px auto auto; }
+.workflow-v8 .composer-wrap:not(.fs) .send-btn { grid-column:2; grid-row:2; justify-self:end; }
+.workflow-v8 .composer-wrap:not(.fs) .workflow-steer { grid-column:3; grid-row:2; }
+/* 工具行：指令 / 模型 / 用量 / 图片 / 麦克风，单独一行铺开，右侧留出语音入口 */
+.workflow-v8 .composer-wrap:not(.fs) .workflow-composer-tools { display:flex; align-items:center; gap:4px; padding:8px 8px 0; }
+.workflow-v8 .composer-wrap:not(.fs) .workflow-composer-tools :is(.plus-btn,.composer-image-btn,.composer-mic-btn) { flex:0 0 40px; width:40px; height:40px; min-width:40px; min-height:40px; padding:0; border:0; background:transparent; color:var(--dsr-muted); }
+.workflow-v8 .composer-wrap:not(.fs) .workflow-composer-tools .workflow-composer-config { flex:0 1 auto; min-width:0; }
+.workflow-v8 .composer-wrap:not(.fs) .workflow-composer-tools .composer-mic-btn { margin-left:auto; }
+.workflow-v8 .composer-wrap:not(.fs) .workflow-composer-tools .composer-mic-btn.recording { color:var(--dsr-error); background:var(--dsr-error-soft); }
+.workflow-v8 .composer-wrap.fs .workflow-composer-tools { display:flex; align-items:center; justify-content:flex-end; padding:6px 8px 0; }
+.workflow-v8 .composer-wrap.fs .workflow-composer-tools :is(#btn-plus,.workflow-composer-config,#btn-image) { display:none; }
 .workflow-v8 .composer textarea { box-sizing:border-box; min-height:40px; border-radius:16px; border:0; background:transparent; padding:8px; font-size:16px; }
 .workflow-v8 .composer :is(.plus-btn,.composer-image-btn) { min-width:44px; min-height:44px; border:0; border-radius:12px; background:transparent; color:var(--dsr-muted); }
 .workflow-v8 #btn-plus { width:auto; padding-inline:10px; font-size:12px; }
