@@ -6306,8 +6306,20 @@ async function checkUpdate(silent) {
 }
 
 async function sha256Hex(buffer) {
-  const digest = await crypto.subtle.digest('SHA-256', buffer)
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
+  // 非安全上下文（http:// 局域网/DDNS 页面）没有 crypto.subtle：用 sha256.js 的纯 JS 实现兜底，
+  // 否则浏览器打开更新页会报 "Cannot read properties of undefined (reading 'digest')"。
+  const subtle = globalThis.crypto && globalThis.crypto.subtle
+  if (subtle && typeof subtle.digest === 'function') {
+    const digest = await subtle.digest('SHA-256', buffer)
+    return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
+  }
+  const JsSha256 = globalThis.SHA256 || (typeof SHA256 === 'function' ? SHA256 : null)
+  if (JsSha256) {
+    const hasher = new JsSha256()
+    hasher.update(new Uint8Array(buffer))
+    return hasher.hex()
+  }
+  throw new Error('当前页面无法计算 SHA-256，请改用 App 或 https 地址打开')
 }
 
 let updateDownloadBusy = false
