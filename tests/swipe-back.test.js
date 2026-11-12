@@ -22,12 +22,12 @@ test('左边缘向右滑足够远算返回', () => {
 
 test('起手不在左边缘、距离太短或向左滑都不算', () => {
   assert.equal(swipeBackIntent({ startX: 200, startY: 400, endX: 320, endY: 400, elapsedMs: 200 }), false)
-  assert.equal(swipeBackIntent({ startX: 10, startY: 400, endX: 60, endY: 400, elapsedMs: 200 }), false)
+  assert.equal(swipeBackIntent({ startX: 10, startY: 400, endX: 40, endY: 400, elapsedMs: 200 }), false)
   assert.equal(swipeBackIntent({ startX: 10, startY: 400, endX: 2, endY: 400, elapsedMs: 200 }), false)
 })
 
 test('竖直位移过大（在滚动列表里横着划）或太慢不算返回', () => {
-  assert.equal(swipeBackIntent({ startX: 8, startY: 200, endX: 140, endY: 400, elapsedMs: 200 }), false)
+  assert.equal(swipeBackIntent({ startX: 8, startY: 200, endX: 140, endY: 420, elapsedMs: 200 }), false)
   assert.equal(swipeBackIntent({ startX: 8, startY: 200, endX: 140, endY: 200, elapsedMs: 1500 }), false)
 })
 

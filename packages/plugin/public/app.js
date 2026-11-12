@@ -2676,11 +2676,11 @@ function swipeBackIntent(gesture) {
   const dy = (Number(start.endY) || 0) - (Number(start.startY) || 0)
   const elapsed = Number(start.elapsedMs)
   const width = Number(start.width) || 0
-  const fromLeft = startX <= 32 && dx >= 64
-  const fromRight = width > 0 && startX >= width - 32 && dx <= -64
+  const fromLeft = startX <= 48 && dx >= 48
+  const fromRight = width > 0 && startX >= width - 48 && dx <= -48
   return (fromLeft || fromRight)
-    && Math.abs(dy) <= 72
-    && (!Number.isFinite(elapsed) || elapsed <= 700)
+    && Math.abs(dy) <= 80
+    && (!Number.isFinite(elapsed) || elapsed <= 800)
 }
 /* <<< 侧滑返回判定 */
 
@@ -2690,8 +2690,9 @@ function bindNativeBack() {
   try {
     CAP.Plugins?.App?.addListener?.('appStateChange',({isActive})=>{if(isActive)onResume()})
     CAP.Plugins?.App?.addListener?.('backButton', () => {
-      // 同一次侧滑可能既被自实现手势识别、又触发系统 backButton：700ms 内只处理一次。
-      if (Date.now() - lastSwipeBackAt < 700) { lastSwipeBackAt = 0; return }
+      // 同一次侧滑可能既被自实现手势识别、又触发系统 backButton：800ms 内不再重复处理。
+      if (Date.now() - lastSwipeBackAt < 800) return
+      lastNativeBackAt = Date.now()
       handleAppBack()
     })
     bindSwipeBack()
@@ -2735,8 +2736,11 @@ function handleAppBack() {
 
 // 记录最近一次由「自实现侧滑」触发的返回，用于抑制系统 backButton 的重复回调。
 let lastSwipeBackAt = 0
+let lastNativeBackAt = 0
 let swipeBackBound = false
+// 侧滑识别成功时登记，供原生 backButton 去重；原生先到则反过来抑制 JS 这一次。
 function acknowledgeBackSwipe() { lastSwipeBackAt = Date.now() }
+function nativeBackRecently() { return Date.now() - lastNativeBackAt < 300 }
 
 /* 自实现左边缘右滑返回：部分 ROM 的 WebView 不会把系统边缘手势转成 backButton，
  * 这里按边缘手势识别后走同一套返回导航。右滑一次 = 上一级（会话页直接回会话列表），
@@ -2746,24 +2750,8 @@ function bindSwipeBack() {
   swipeBackBound = true
   let tracking = null
   const viewportWidth = () => (typeof window !== 'undefined' && Number(window.innerWidth)) || 0
-  document.addEventListener('touchstart', event => {
-    if (event.touches.length !== 1) { tracking = null; return }
-    const touch = event.touches[0]
-    const width = viewportWidth()
-    const edge = touch.clientX <= 32 ? 'left' : (width > 0 && touch.clientX >= width - 32 ? 'right' : '')
-    tracking = edge ? { edge, startX: touch.clientX, startY: touch.clientY, startedAt: Date.now(), width } : null
-  }, { passive: true })
-  document.addEventListener('touchmove', event => {
-    if (!tracking || event.touches.length !== 1) return
-    const touch = event.touches[0]
-    if (Math.abs(touch.clientY - tracking.startY) > 72) { tracking = null; return }
-    const dx = touch.clientX - tracking.startX
-    const committed = tracking.edge === 'right' ? dx < -160 : dx > 160
-    if (committed) { tracking = null; acknowledgeBackSwipe(); handleAppBack() }
-  }, { passive: true })
-  document.addEventListener('touchend', event => {
+  const finish = touch => {
     if (!tracking) return
-    const touch = (event.changedTouches && event.changedTouches[0]) || null
     const gesture = {
       startX: tracking.startX, startY: tracking.startY, width: tracking.width,
       endX: touch ? touch.clientX : tracking.startX,
@@ -2771,8 +2759,31 @@ function bindSwipeBack() {
       elapsedMs: Date.now() - tracking.startedAt,
     }
     tracking = null
-    if (swipeBackIntent(gesture)) { acknowledgeBackSwipe(); handleAppBack() }
+    if (!swipeBackIntent(gesture)) return
+    if (nativeBackRecently()) return   // 这次手势已被系统 backButton 处理过
+    acknowledgeBackSwipe()
+    handleAppBack()
+  }
+  document.addEventListener('touchstart', event => {
+    if (event.touches.length !== 1) { tracking = null; return }
+    const touch = event.touches[0]
+    const width = viewportWidth()
+    const edge = touch.clientX <= 48 ? 'left' : (width > 0 && touch.clientX >= width - 48 ? 'right' : '')
+    tracking = edge ? { edge, startX: touch.clientX, startY: touch.clientY, startedAt: Date.now(), width } : null
   }, { passive: true })
+  document.addEventListener('touchmove', event => {
+    if (!tracking || event.touches.length !== 1) return
+    const touch = event.touches[0]
+    if (Math.abs(touch.clientY - tracking.startY) > 80) { tracking = null; return }
+    const dx = touch.clientX - tracking.startX
+    const committed = tracking.edge === 'right' ? dx < -120 : dx > 120
+    if (!committed) return
+    // 手势已明确向内滑动：先结算一次，避免等待 touchend 时被系统手势取消吞掉。
+    finish(touch)
+  }, { passive: true })
+  document.addEventListener('touchend', event => finish((event.changedTouches && event.changedTouches[0]) || null), { passive: true })
+  // 系统手势接管 WebView 时会发 touchcancel；此时按已移动距离结算，保证「滑一次」就生效。
+  document.addEventListener('touchcancel', event => finish((event.changedTouches && event.changedTouches[0]) || null), { passive: true })
 }
 
 function renderSessionTitle() {
