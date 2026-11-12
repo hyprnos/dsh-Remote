@@ -12,8 +12,8 @@ const end = source.indexOf('/* <<< 侧滑返回判定')
 assert.ok(start > 0 && end > start)
 const sandbox = {}
 vm.createContext(sandbox)
-vm.runInContext(source.slice(start, end).replace(/^\/\* >>> .*$/m, '') + '\nthis.swipeBackIntent = swipeBackIntent; this.doubleSwipeDecision = doubleSwipeDecision', sandbox)
-const { swipeBackIntent, doubleSwipeDecision } = sandbox
+vm.runInContext(source.slice(start, end).replace(/^\/\* >>> .*$/m, '') + '\nthis.swipeBackIntent = swipeBackIntent; this.backRequestStep = backRequestStep', sandbox)
+const { swipeBackIntent, backRequestStep } = sandbox
 
 test('左边缘向右滑足够远算返回', () => {
   assert.equal(swipeBackIntent({ startX: 4, startY: 400, endX: 120, endY: 406, elapsedMs: 260 }), true)
@@ -42,13 +42,23 @@ test('右边缘向内左滑同样算返回', () => {
   assert.equal(swipeBackIntent({ startX: width - 6, startY: 200, endX: width - 140, endY: 380, elapsedMs: 300, width }), false)
 })
 
-test('防误触：第一次滑动只登记，窗口内第二次才返回', () => {
-  const decide = (lastAt, now) => doubleSwipeDecision(lastAt, now, 1200)
-  assert.equal(decide(0, 1000), 'pending')
-  assert.equal(decide(1000, 1500), 'navigate')
-  assert.equal(decide(1000, 2200), 'navigate')   // 恰好窗口内
-  assert.equal(decide(1000, 2300), 'pending')    // 超过窗口重新计数
-  assert.equal(decide(3000, 3100), 'navigate')
+test('防误触：同一手势合并计数，窗口内第二次才导航', () => {
+  // 第一次请求：只登记
+  let step = backRequestStep(0, 1000, 0)
+  assert.equal(step.navigate, false)
+  assert.equal(step.streak, 1)
+  // 同一手势 300ms 内的重复上报（原生+JS 各一次）被合并
+  step = backRequestStep(step.previous, 1300, step.streak)
+  assert.equal(step.duplicate, true)
+  assert.equal(step.navigate, false)
+  // 第二次真实滑动：导航
+  step = backRequestStep(step.previous, 2000, step.streak)
+  assert.equal(step.navigate, true)
+  assert.equal(step.streak, 0)
+  // 超窗口重新计数
+  step = backRequestStep(1000, 4000, 1)
+  assert.equal(step.navigate, false)
+  assert.equal(step.streak, 1)
 })
 
 test('缺字段不抛错且视为非返回', () => {
