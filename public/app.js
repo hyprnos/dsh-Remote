@@ -2666,12 +2666,35 @@ async function closeSession() {
   }
 }
 
+/* >>> 侧滑返回判定：tests/swipe-back.test.js 直接切片执行，勿依赖 DOM */
+// 左边缘起手、水平右滑足够远、竖直位移小且时间短，才算一次「返回」手势。
+function swipeBackIntent(gesture) {
+  const start = gesture || {}
+  const dx = (Number(start.endX) || 0) - (Number(start.startX) || 0)
+  const dy = (Number(start.endY) || 0) - (Number(start.startY) || 0)
+  const elapsed = Number(start.elapsedMs)
+  return (Number(start.startX) || 0) <= 32
+    && dx >= 64
+    && Math.abs(dy) <= 72
+    && (!Number.isFinite(elapsed) || elapsed <= 700)
+}
+/* <<< 侧滑返回判定 */
+
 /* Android 手势返回/实体返回: 注册后系统不再直接杀 App, 由这里接管导航 */
 function bindNativeBack() {
   if (!CAP?.isNativePlatform?.()) return
   try {
     CAP.Plugins?.App?.addListener?.('appStateChange',({isActive})=>{if(isActive)onResume()})
     CAP.Plugins?.App?.addListener?.('backButton', () => {
+      // 同一次侧滑可能既被自实现手势识别、又触发系统 backButton：700ms 内只处理一次。
+      if (Date.now() - lastSwipeBackAt < 700) { lastSwipeBackAt = 0; return }
+      handleAppBack()
+    })
+    bindSwipeBack()
+  } catch {}
+}
+
+function handleAppBack() {
       if ($('composer-wrap')?.classList.contains('fs')) { setComposerFullscreen(false); return }
       if (customSelectCurrent) { closeCustomSelect(); return }
       if (groupDrawerOpen()) { closeGroupDrawer(); return }
@@ -2704,8 +2727,43 @@ function bindNativeBack() {
       }
       if ($('view-home').classList.contains('hidden')) { showView('view-home'); return }
       try { CAP.Plugins?.App?.exitApp?.() } catch {}                  // 主页再返回 → 退出(与系统一致)
-    })
-  } catch {}
+}
+
+// 记录最近一次由「自实现侧滑」触发的返回，用于抑制系统 backButton 的重复回调。
+let lastSwipeBackAt = 0
+let swipeBackBound = false
+function acknowledgeBackSwipe() { lastSwipeBackAt = Date.now() }
+
+/* 自实现左边缘右滑返回：部分 ROM 的 WebView 不会把系统边缘手势转成 backButton，
+ * 这里按边缘手势识别后走同一套返回导航。右滑一次 = 上一级（会话页直接回会话列表），
+ * 连续滑两次等同于连按两次返回。 */
+function bindSwipeBack() {
+  if (typeof document === 'undefined' || swipeBackBound) return
+  swipeBackBound = true
+  let tracking = null
+  document.addEventListener('touchstart', event => {
+    if (event.touches.length !== 1) { tracking = null; return }
+    const touch = event.touches[0]
+    tracking = touch.clientX <= 32 ? { startX: touch.clientX, startY: touch.clientY, startedAt: Date.now() } : null
+  }, { passive: true })
+  document.addEventListener('touchmove', event => {
+    if (!tracking || event.touches.length !== 1) return
+    const touch = event.touches[0]
+    if (Math.abs(touch.clientY - tracking.startY) > 72) { tracking = null; return }
+    if (touch.clientX - tracking.startX > 160) { tracking = null; acknowledgeBackSwipe(); handleAppBack() }
+  }, { passive: true })
+  document.addEventListener('touchend', event => {
+    if (!tracking) return
+    const touch = (event.changedTouches && event.changedTouches[0]) || null
+    const gesture = {
+      startX: tracking.startX, startY: tracking.startY,
+      endX: touch ? touch.clientX : tracking.startX,
+      endY: touch ? touch.clientY : tracking.startY,
+      elapsedMs: Date.now() - tracking.startedAt,
+    }
+    tracking = null
+    if (swipeBackIntent(gesture)) { acknowledgeBackSwipe(); handleAppBack() }
+  }, { passive: true })
 }
 
 function renderSessionTitle() {

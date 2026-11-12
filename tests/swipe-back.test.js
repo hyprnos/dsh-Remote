@@ -1,0 +1,37 @@
+'use strict'
+/** 侧滑返回判定：从 app.js 切片执行 swipeBackIntent。 */
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const vm = require('node:vm')
+
+const source = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8')
+const start = source.indexOf('/* >>> 侧滑返回判定')
+const end = source.indexOf('/* <<< 侧滑返回判定')
+assert.ok(start > 0 && end > start)
+const sandbox = {}
+vm.createContext(sandbox)
+vm.runInContext(source.slice(start, end).replace(/^\/\* >>> .*$/m, '') + '\nthis.swipeBackIntent = swipeBackIntent', sandbox)
+const { swipeBackIntent } = sandbox
+
+test('左边缘向右滑足够远算返回', () => {
+  assert.equal(swipeBackIntent({ startX: 4, startY: 400, endX: 120, endY: 406, elapsedMs: 260 }), true)
+  assert.equal(swipeBackIntent({ startX: 32, startY: 400, endX: 100, endY: 400, elapsedMs: 200 }), true)
+})
+
+test('起手不在左边缘、距离太短或向左滑都不算', () => {
+  assert.equal(swipeBackIntent({ startX: 200, startY: 400, endX: 320, endY: 400, elapsedMs: 200 }), false)
+  assert.equal(swipeBackIntent({ startX: 10, startY: 400, endX: 60, endY: 400, elapsedMs: 200 }), false)
+  assert.equal(swipeBackIntent({ startX: 10, startY: 400, endX: 2, endY: 400, elapsedMs: 200 }), false)
+})
+
+test('竖直位移过大（在滚动列表里横着划）或太慢不算返回', () => {
+  assert.equal(swipeBackIntent({ startX: 8, startY: 200, endX: 140, endY: 400, elapsedMs: 200 }), false)
+  assert.equal(swipeBackIntent({ startX: 8, startY: 200, endX: 140, endY: 200, elapsedMs: 1500 }), false)
+})
+
+test('缺字段不抛错且视为非返回', () => {
+  assert.equal(swipeBackIntent(), false)
+  assert.equal(swipeBackIntent({}), false)
+})
