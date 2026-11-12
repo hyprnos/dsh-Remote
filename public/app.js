@@ -2682,6 +2682,15 @@ function swipeBackIntent(gesture) {
     && Math.abs(dy) <= 80
     && (!Number.isFinite(elapsed) || elapsed <= 800)
 }
+// 防误触：需要「连续两次向内滑动」才执行返回。第一次只记时间并给提示，
+// 窗口内（默认 1200ms）的第二次才真正返回；间隔过久则重新计数。
+function doubleSwipeDecision(lastAt, now, windowMs) {
+  const last = Number(lastAt) || 0
+  const current = Number(now) || 0
+  const limit = Number(windowMs) > 0 ? Number(windowMs) : 1200
+  return last > 0 && current - last <= limit ? 'navigate' : 'pending'
+}
+
 /* <<< 侧滑返回判定 */
 
 /* Android 手势返回/实体返回: 注册后系统不再直接杀 App, 由这里接管导航 */
@@ -2737,7 +2746,9 @@ function handleAppBack() {
 // 记录最近一次由「自实现侧滑」触发的返回，用于抑制系统 backButton 的重复回调。
 let lastSwipeBackAt = 0
 let lastNativeBackAt = 0
+let lastHalfSwipeAt = 0
 let swipeBackBound = false
+const DOUBLE_SWIPE_WINDOW_MS = 1200
 // 侧滑识别成功时登记，供原生 backButton 去重；原生先到则反过来抑制 JS 这一次。
 function acknowledgeBackSwipe() { lastSwipeBackAt = Date.now() }
 function nativeBackRecently() { return Date.now() - lastNativeBackAt < 300 }
@@ -2762,7 +2773,14 @@ function bindSwipeBack() {
     if (!swipeBackIntent(gesture)) return
     if (nativeBackRecently()) return   // 这次手势已被系统 backButton 处理过
     acknowledgeBackSwipe()
-    handleAppBack()
+    // 防误触：第一次滑动只登记并提示，窗口内再滑一次才真正返回。
+    if (doubleSwipeDecision(lastHalfSwipeAt, Date.now(), DOUBLE_SWIPE_WINDOW_MS) === 'navigate') {
+      lastHalfSwipeAt = 0
+      handleAppBack()
+      return
+    }
+    lastHalfSwipeAt = Date.now()
+    try { toast(t('swipe.again'), '') } catch {}
   }
   document.addEventListener('touchstart', event => {
     if (event.touches.length !== 1) { tracking = null; return }
