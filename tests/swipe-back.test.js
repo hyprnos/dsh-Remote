@@ -31,6 +31,17 @@ test('竖直位移过大（在滚动列表里横着划）或太慢不算返回',
   assert.equal(swipeBackIntent({ startX: 8, startY: 200, endX: 140, endY: 200, elapsedMs: 1500 }), false)
 })
 
+test('右边缘向内左滑同样算返回', () => {
+  const width = 390
+  assert.equal(swipeBackIntent({ startX: width - 6, startY: 500, endX: width - 140, endY: 505, elapsedMs: 240, width }), true)
+  // 右边缘但向右滑（反方向）不算
+  assert.equal(swipeBackIntent({ startX: width - 6, startY: 500, endX: width + 60, endY: 500, elapsedMs: 200, width }), false)
+  // 中间起手仍不算
+  assert.equal(swipeBackIntent({ startX: 180, startY: 500, endX: 60, endY: 500, elapsedMs: 200, width }), false)
+  // 右边缘竖直滚动不算
+  assert.equal(swipeBackIntent({ startX: width - 6, startY: 200, endX: width - 140, endY: 380, elapsedMs: 300, width }), false)
+})
+
 test('缺字段不抛错且视为非返回', () => {
   assert.equal(swipeBackIntent(), false)
   assert.equal(swipeBackIntent({}), false)

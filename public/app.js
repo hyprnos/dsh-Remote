@@ -2667,14 +2667,18 @@ async function closeSession() {
 }
 
 /* >>> 侧滑返回判定：tests/swipe-back.test.js 直接切片执行，勿依赖 DOM */
-// 左边缘起手、水平右滑足够远、竖直位移小且时间短，才算一次「返回」手势。
+// 返回手势：左右两侧边缘向内滑动都算（Android 手势导航两侧都支持），
+// 要求水平位移足够、竖直位移小、时间短。width 用于识别右边缘起手。
 function swipeBackIntent(gesture) {
   const start = gesture || {}
-  const dx = (Number(start.endX) || 0) - (Number(start.startX) || 0)
+  const startX = Number(start.startX) || 0
+  const dx = (Number(start.endX) || 0) - startX
   const dy = (Number(start.endY) || 0) - (Number(start.startY) || 0)
   const elapsed = Number(start.elapsedMs)
-  return (Number(start.startX) || 0) <= 32
-    && dx >= 64
+  const width = Number(start.width) || 0
+  const fromLeft = startX <= 32 && dx >= 64
+  const fromRight = width > 0 && startX >= width - 32 && dx <= -64
+  return (fromLeft || fromRight)
     && Math.abs(dy) <= 72
     && (!Number.isFinite(elapsed) || elapsed <= 700)
 }
@@ -2741,22 +2745,27 @@ function bindSwipeBack() {
   if (typeof document === 'undefined' || swipeBackBound) return
   swipeBackBound = true
   let tracking = null
+  const viewportWidth = () => (typeof window !== 'undefined' && Number(window.innerWidth)) || 0
   document.addEventListener('touchstart', event => {
     if (event.touches.length !== 1) { tracking = null; return }
     const touch = event.touches[0]
-    tracking = touch.clientX <= 32 ? { startX: touch.clientX, startY: touch.clientY, startedAt: Date.now() } : null
+    const width = viewportWidth()
+    const edge = touch.clientX <= 32 ? 'left' : (width > 0 && touch.clientX >= width - 32 ? 'right' : '')
+    tracking = edge ? { edge, startX: touch.clientX, startY: touch.clientY, startedAt: Date.now(), width } : null
   }, { passive: true })
   document.addEventListener('touchmove', event => {
     if (!tracking || event.touches.length !== 1) return
     const touch = event.touches[0]
     if (Math.abs(touch.clientY - tracking.startY) > 72) { tracking = null; return }
-    if (touch.clientX - tracking.startX > 160) { tracking = null; acknowledgeBackSwipe(); handleAppBack() }
+    const dx = touch.clientX - tracking.startX
+    const committed = tracking.edge === 'right' ? dx < -160 : dx > 160
+    if (committed) { tracking = null; acknowledgeBackSwipe(); handleAppBack() }
   }, { passive: true })
   document.addEventListener('touchend', event => {
     if (!tracking) return
     const touch = (event.changedTouches && event.changedTouches[0]) || null
     const gesture = {
-      startX: tracking.startX, startY: tracking.startY,
+      startX: tracking.startX, startY: tracking.startY, width: tracking.width,
       endX: touch ? touch.clientX : tracking.startX,
       endY: touch ? touch.clientY : tracking.startY,
       elapsedMs: Date.now() - tracking.startedAt,
