@@ -1553,7 +1553,9 @@ try {
 const ROOT = __dirname
 const PUBLIC_DIR = path.join(ROOT, 'public')
 const ANNOUNCEMENTS_FILE = process.env.DSH_REMOTE_ANNOUNCEMENTS_FILE || path.join(PUBLIC_DIR, 'announcements.json')
-const DEFAULT_ANNOUNCEMENTS_URL = 'https://vm-0-2-ubuntu.tail1f6fc4.ts.net/announcements.json'
+// 本分支不订阅上游（原作者）的公告源，只用随包 announcements.json；
+// 需要恢复时把地址填回或设置 DSH_REMOTE_ANNOUNCEMENTS_URL。
+const DEFAULT_ANNOUNCEMENTS_URL = ''
 const ANNOUNCEMENTS_URL = process.env.DSH_REMOTE_ANNOUNCEMENTS_URL === undefined
   ? DEFAULT_ANNOUNCEMENTS_URL
   : String(process.env.DSH_REMOTE_ANNOUNCEMENTS_URL || '').trim()

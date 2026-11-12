@@ -5847,10 +5847,14 @@ function renderAnnouncementBoard() {
   const box = $('overview-announcement-list')
   if (!box) return
   const items = announcementBoardItems()
+  const board = $('overview-announcement-board')
+  // 本分支默认不订阅上游公告：没有公告时整块隐藏，不留"暂无公告"占位。
   if (!items.length) {
     box.innerHTML = `<div class="overview-empty">${esc(t('overview.communityEmpty'))}</div>`
+    if (board) board.classList.toggle('hidden', root.__DSR_FORK__?.announcements === false)
     return
   }
+  if (board) board.classList.remove('hidden')
   box.innerHTML = items.map(item => {
     const poll = !!item.poll
     const vote = announcementVote(item)

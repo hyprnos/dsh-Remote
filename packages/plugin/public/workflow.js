@@ -290,6 +290,7 @@
       theme:{title:['外观','Appearance'],intro:['选择你喜欢的配色。','Choose your preferred color palette.'],icon:'general',groups:[['main','配色','Color palette']]},
       tests:{title:['功能测试','Diagnostics'],intro:['检查当前设备与主机的可用能力。','Check the capabilities of this device and host.'],icon:'host',groups:[['main','功能检查','Capability checks']]},
     }
+    if(root.__DSR_FORK__?.relay === false)definitions.servers.groups=definitions.servers.groups.filter(group=>group[0]!=='relay')
     const includes=(node,selector)=>node.matches(selector)||!!node.querySelector(selector)
     for(const [key,definition] of Object.entries(definitions)){
       const page=$('settings-page-'+key);if(!page||page.classList.contains('workflow-subpage'))continue
@@ -403,7 +404,8 @@
     sheet.addEventListener('close',()=>{if(!sheet.open){restoreAttention();operationList=null}})
     setupMore();setupStart();setupComposer();config.start?.()
     const relaySettings=$('relay-settings')
-    if(relaySettings){$('settings-page-servers')?.append(relaySettings);root.DshRelaySettings?.mount(relaySettings,{connection:config.relay||config.operations});root.DshE2eeTransport?.mount(relaySettings,{connection:config.relay||config.operations,onConnect:config.e2eeConnect,onModeChange:config.e2eeModeChange,onAutoPaired:config.e2eeAutoPaired,onScan:config.e2eeScan})}
+    // 本分支默认不用云中转：隐藏中转/端到端设置区块（代码保留，改 fork 标记即可恢复）
+    if(root.__DSR_FORK__?.relay === false){relaySettings?.remove()}else if(relaySettings){$('settings-page-servers')?.append(relaySettings);root.DshRelaySettings?.mount(relaySettings,{connection:config.relay||config.operations});root.DshE2eeTransport?.mount(relaySettings,{connection:config.relay||config.operations,onConnect:config.e2eeConnect,onModeChange:config.e2eeModeChange,onAutoPaired:config.e2eeAutoPaired,onScan:config.e2eeScan})}
     setupSecondaryPages()
     const overview=$('view-activity');if(overview)overview.dataset.workflowLegacy='overview'
     if(!config.desktop){

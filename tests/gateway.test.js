@@ -2006,7 +2006,9 @@ test('中央公告首次不可达时回退内置公告', async () => {
   assert.equal(res.status, 200)
   assert.equal(res.headers.get('x-dsh-announcements-source'), 'local')
   const body = await res.json()
-  assert.ok(body.items.some(item => item.id === '2026-08-23-feedback-polls'))
+  // 回退内容应与随包 announcements.json 完全一致（本分支可为空列表）。
+  const bundled = JSON.parse(fs.readFileSync(path.join(ROOT, 'public', 'announcements.json'), 'utf8'))
+  assert.deepEqual(body.items, bundled.items)
   fakeAnnouncementsStatus = 200
 })
 
