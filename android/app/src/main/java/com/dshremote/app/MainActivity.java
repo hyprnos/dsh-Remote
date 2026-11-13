@@ -164,8 +164,6 @@ public class MainActivity extends BridgeActivity {
   /** 返回键/系统手势统一交给页面导航；页面返回 true 表示已处理，否则按系统默认退出。 */
   private void handleBackPressed() {
     try {
-      // 诊断用 Toast：不依赖 WebView，能直接证明返回键是否到达原生侧。
-      try { Toast.makeText(this, "返回键已收到", Toast.LENGTH_SHORT).show(); } catch (Throwable ignored) {}
       if (bridge == null || bridge.getWebView() == null) { exitFromBack(); return; }
       bridge.getWebView().evaluateJavascript(
           "(function(){try{return window.__dshRemoteBack?window.__dshRemoteBack()===true:'no-bridge'}catch(e){return 'error:'+(e&&e.message)}})()",
