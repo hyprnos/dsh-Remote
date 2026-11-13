@@ -987,7 +987,8 @@ function closeGroupMenu() {
 let groupDrawerReturnFocus = null
 
 function groupDrawerOpen() {
-  return !$('group-drawer')?.classList.contains('hidden')
+  const drawer = $('group-drawer')
+  return !!drawer && !drawer.classList.contains('hidden')
 }
 
 function renderGroupDrawer() {
@@ -2676,11 +2677,11 @@ function swipeBackIntent(gesture) {
   const dy = (Number(start.endY) || 0) - (Number(start.startY) || 0)
   const elapsed = Number(start.elapsedMs)
   const width = Number(start.width) || 0
-  const fromLeft = startX <= 48 && dx >= 48
-  const fromRight = width > 0 && startX >= width - 48 && dx <= -48
+  const fromLeft = startX <= 120 && dx >= 80
+  const fromRight = width > 0 && startX >= width - 120 && dx <= -80
   return (fromLeft || fromRight)
-    && Math.abs(dy) <= 80
-    && (!Number.isFinite(elapsed) || elapsed <= 800)
+    && Math.abs(dy) <= 60
+    && (!Number.isFinite(elapsed) || elapsed <= 900)
 }
 // 返回请求聚合：原生 backButton 与 JS 侧滑可能对同一次手势各上报一次，
 // 400ms 内视为同一次，合并计数；窗口内累计 2 次才真正导航（防误触）。
@@ -2751,11 +2752,39 @@ function requestBack() {
   if (step.duplicate) return
   backRequestAt = step.previous
   backRequestStreak = step.streak
-  if (!step.navigate) {
-    try { toast(t('swipe.again'), '') } catch {}
-    return
+  // 可见计数：既做防误触提示，也方便判断手势到底有没有被识别（1/2 → 2/2）。
+  try { backCounterHint(step.navigate ? '2/2' : (step.streak + '/2')) } catch {}
+  if (!step.navigate) return
+  runBackNavigation()
+}
+
+// 顶栏下方的临时计数提示（1.4 秒后消失），用于侧滑返回的连击反馈与排障。
+let backHintTimer = null
+function backCounterHint(text) {
+  if (typeof document === 'undefined') return
+  let node = document.getElementById('back-gesture-hint')
+  if (!node) {
+    node = document.createElement('div')
+    node.id = 'back-gesture-hint'
+    node.className = 'back-gesture-hint'
+    node.setAttribute('role', 'status')
+    node.setAttribute('aria-live', 'polite')
+    document.body.appendChild(node)
   }
-  handleAppBack()
+  node.textContent = '返回 ' + text
+  node.classList.remove('hidden')
+  clearTimeout(backHintTimer)
+  backHintTimer = setTimeout(() => { node.classList.add('hidden') }, 1400)
+}
+
+// 导航执行加兜底：任何一步抛错或没命中分支时，只要还在会话里就退出会话。
+function runBackNavigation() {
+  try {
+    handleAppBack()
+  } catch (error) {
+    try { console.warn('back navigation failed', error) } catch {}
+    if (state.current) void closeSession()
+  }
 }
 
 /* 自实现左边缘右滑返回：部分 ROM 的 WebView 不会把系统边缘手势转成 backButton，
@@ -2784,7 +2813,7 @@ function bindSwipeBack() {
     if (event.touches.length !== 1) { tracking = null; return }
     const touch = event.touches[0]
     const width = viewportWidth()
-    const edge = touch.clientX <= 60 ? 'left' : (width > 0 && touch.clientX >= width - 60 ? 'right' : '')
+    const edge = touch.clientX <= 120 ? 'left' : (width > 0 && touch.clientX >= width - 120 ? 'right' : '')
     tracking = edge ? { edge, startX: touch.clientX, startY: touch.clientY, startedAt: Date.now(), width } : null
   }, { passive: true })
   document.addEventListener('touchmove', event => {
@@ -2794,7 +2823,7 @@ function bindSwipeBack() {
     tracking.lastY = touch.clientY
     if (Math.abs(touch.clientY - tracking.startY) > 80) { tracking = null; return }
     const dx = touch.clientX - tracking.startX
-    const committed = tracking.edge === 'right' ? dx < -120 : dx > 120
+    const committed = tracking.edge === 'right' ? dx < -110 : dx > 110
     if (!committed) return
     // 手势已明确向内滑动：先结算一次，避免等待 touchend 时被系统手势取消吞掉。
     finish(touch)

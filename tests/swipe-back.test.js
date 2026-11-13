@@ -17,12 +17,12 @@ const { swipeBackIntent, backRequestStep } = sandbox
 
 test('左边缘向右滑足够远算返回', () => {
   assert.equal(swipeBackIntent({ startX: 4, startY: 400, endX: 120, endY: 406, elapsedMs: 260 }), true)
-  assert.equal(swipeBackIntent({ startX: 32, startY: 400, endX: 100, endY: 400, elapsedMs: 200 }), true)
+  assert.equal(swipeBackIntent({ startX: 100, startY: 400, endX: 200, endY: 400, elapsedMs: 200 }), true)
 })
 
 test('起手不在左边缘、距离太短或向左滑都不算', () => {
   assert.equal(swipeBackIntent({ startX: 200, startY: 400, endX: 320, endY: 400, elapsedMs: 200 }), false)
-  assert.equal(swipeBackIntent({ startX: 10, startY: 400, endX: 40, endY: 400, elapsedMs: 200 }), false)
+  assert.equal(swipeBackIntent({ startX: 10, startY: 400, endX: 60, endY: 400, elapsedMs: 200 }), false)
   assert.equal(swipeBackIntent({ startX: 10, startY: 400, endX: 2, endY: 400, elapsedMs: 200 }), false)
 })
 

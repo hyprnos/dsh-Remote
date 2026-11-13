@@ -1535,3 +1535,7 @@ body.in-session #session-sub { min-height:32px; padding:4px 2px; }
 .config-transfer-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .config-transfer-actions .mini-btn { cursor: pointer; }
 .config-transfer-status { min-height: 16px; font-size: 12px; color: var(--dsr-muted); }
+
+/* 侧滑返回连击计数提示（1/2 → 2/2），仅短暂显示，用于防误触反馈与手势排障 */
+.back-gesture-hint { position: fixed; left: 50%; top: calc(14px + var(--dsr-safe-top)); transform: translateX(-50%); z-index: 70; padding: 6px 12px; border-radius: 999px; font-size: 12px; color: var(--dsr-on-accent); background: rgba(0,0,0,.72); pointer-events: none; transition: opacity .2s ease; }
+.back-gesture-hint.hidden { opacity: 0; }
