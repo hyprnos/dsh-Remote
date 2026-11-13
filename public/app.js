@@ -2683,15 +2683,13 @@ function swipeBackIntent(gesture) {
     && Math.abs(dy) <= 60
     && (!Number.isFinite(elapsed) || elapsed <= 900)
 }
-// 返回请求聚合：原生 backButton 与 JS 侧滑可能对同一次手势各上报一次，
-// 400ms 内视为同一次，合并计数；窗口内累计 2 次才真正导航（防误触）。
-function backRequestStep(previous, now, streak) {
+// 返回请求去重：原生 backButton 与 JS 侧滑可能对同一次手势各上报一次，
+// 300ms 内视为同一次；除此之外「滑一次就返回」，不再要求连击。
+function backRequestStep(previous, now) {
   const at = Number(previous) || 0
   const time = Number(now) || 0
-  const count = Number(streak) || 0
-  if (at > 0 && time - at < 400) return { duplicate: true, streak: count, previous: at, navigate: false }
-  const next = at > 0 && time - at <= 2500 ? count + 1 : 1
-  return { duplicate: false, streak: next >= 2 ? 0 : next, previous: next >= 2 ? 0 : time, navigate: next >= 2 }
+  if (at > 0 && time - at < 300) return { duplicate: true, previous: at, navigate: false }
+  return { duplicate: false, previous: time, navigate: true }
 }
 
 /* <<< 侧滑返回判定 */
@@ -2745,16 +2743,13 @@ function handleAppBack() {
 
 // 统一的「返回请求」入口：原生返回键/手势与 JS 侧滑都走这里，2 次连击才导航。
 let backRequestAt = 0
-let backRequestStreak = 0
 let swipeBackBound = false
 function requestBack() {
-  const step = backRequestStep(backRequestAt, Date.now(), backRequestStreak)
+  const step = backRequestStep(backRequestAt, Date.now())
   if (step.duplicate) return
   backRequestAt = step.previous
-  backRequestStreak = step.streak
-  // 可见计数：既做防误触提示，也方便判断手势到底有没有被识别（1/2 → 2/2）。
-  try { backCounterHint(step.navigate ? '2/2' : (step.streak + '/2')) } catch {}
-  if (!step.navigate) return
+  // 短暂提示：确认手势/返回键被识别（1.4 秒后自动消失）。
+  try { backCounterHint('返回') } catch {}
   runBackNavigation()
 }
 

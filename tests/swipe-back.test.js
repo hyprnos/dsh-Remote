@@ -42,23 +42,16 @@ test('右边缘向内左滑同样算返回', () => {
   assert.equal(swipeBackIntent({ startX: width - 6, startY: 200, endX: width - 140, endY: 380, elapsedMs: 300, width }), false)
 })
 
-test('防误触：同一手势合并计数，窗口内第二次才导航', () => {
-  // 第一次请求：只登记
-  let step = backRequestStep(0, 1000, 0)
-  assert.equal(step.navigate, false)
-  assert.equal(step.streak, 1)
-  // 同一手势 300ms 内的重复上报（原生+JS 各一次）被合并
-  step = backRequestStep(step.previous, 1300, step.streak)
+test('滑一次就返回，仅对同一次手势的双上报去重', () => {
+  let step = backRequestStep(0, 1000)
+  assert.equal(step.navigate, true)
+  // 同一次手势 300ms 内的第二次上报（原生+JS 各一次）被吞掉
+  step = backRequestStep(step.previous, 1200)
   assert.equal(step.duplicate, true)
   assert.equal(step.navigate, false)
-  // 第二次真实滑动：导航
-  step = backRequestStep(step.previous, 2000, step.streak)
+  // 300ms 之后的第二次滑动照常返回
+  step = backRequestStep(1000, 1400)
   assert.equal(step.navigate, true)
-  assert.equal(step.streak, 0)
-  // 超窗口重新计数
-  step = backRequestStep(1000, 4000, 1)
-  assert.equal(step.navigate, false)
-  assert.equal(step.streak, 1)
 })
 
 test('缺字段不抛错且视为非返回', () => {
