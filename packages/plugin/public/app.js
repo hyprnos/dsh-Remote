@@ -5457,7 +5457,7 @@ async function runFsUpload(up) {
       err.code = up.cancelled ? 'CANCELLED' : 'PAUSED'
       reject(err)
     }
-    xhr.send(blob)
+    xhr.send(body)
   })
 
   const probe = async () => {
