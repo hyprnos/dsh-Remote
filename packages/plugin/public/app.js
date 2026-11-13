@@ -2668,8 +2668,8 @@ async function closeSession() {
 }
 
 /* >>> 侧滑返回判定：tests/swipe-back.test.js 直接切片执行，勿依赖 DOM */
-// 返回手势：左右两侧边缘向内滑动都算（Android 手势导航两侧都支持），
-// 要求水平位移足够、竖直位移小、时间短。width 用于识别右边缘起手。
+// 返回手势：屏幕**任意位置**的长距离水平右滑（不依赖系统边缘手势是否把 touch 交给我们），
+// 也兼容从右边缘向左滑。要求以水平位移为主、竖直位移很小、动作够快，避免误触。
 function swipeBackIntent(gesture) {
   const start = gesture || {}
   const startX = Number(start.startX) || 0
@@ -2677,11 +2677,14 @@ function swipeBackIntent(gesture) {
   const dy = (Number(start.endY) || 0) - (Number(start.startY) || 0)
   const elapsed = Number(start.elapsedMs)
   const width = Number(start.width) || 0
-  const fromLeft = startX <= 120 && dx >= 80
-  const fromRight = width > 0 && startX >= width - 120 && dx <= -80
-  return (fromLeft || fromRight)
-    && Math.abs(dy) <= 60
-    && (!Number.isFinite(elapsed) || elapsed <= 900)
+  const stillFromLeft = startX <= 32
+  // 左→右：任意起手点都可，但必须明显水平且位移够长
+  if (dx >= 90 && Math.abs(dy) <= 45 && (!Number.isFinite(elapsed) || elapsed <= 800)) return true
+  // 右→左：仅右侧边缘起手（避免列表里向左划误触）
+  if (width > 0 && startX >= width - 120 && dx <= -90 && Math.abs(dy) <= 45 && (!Number.isFinite(elapsed) || elapsed <= 800)) return true
+  // 边缘起手时放宽竖直容差，贴近系统手势的手感
+  if (stillFromLeft && dx >= 80 && Math.abs(dy) <= 80 && (!Number.isFinite(elapsed) || elapsed <= 900)) return true
+  return false
 }
 // 返回请求去重：原生 backButton 与 JS 侧滑可能对同一次手势各上报一次，
 // 300ms 内视为同一次；除此之外「滑一次就返回」，不再要求连击。
@@ -2808,8 +2811,11 @@ function bindSwipeBack() {
     if (event.touches.length !== 1) { tracking = null; return }
     const touch = event.touches[0]
     const width = viewportWidth()
-    const edge = touch.clientX <= 120 ? 'left' : (width > 0 && touch.clientX >= width - 120 ? 'right' : '')
-    tracking = edge ? { edge, startX: touch.clientX, startY: touch.clientY, startedAt: Date.now(), width } : null
+    // 输入框内的滑动交给文本选择，不参与返回手势
+    const target = event.target
+    const inComposer = !!(target && typeof target.closest === 'function' && target.closest('#composer-wrap'))
+    if (inComposer) { tracking = null; return }
+    tracking = { startX: touch.clientX, startY: touch.clientY, startedAt: Date.now(), width }
   }, { passive: true })
   document.addEventListener('touchmove', event => {
     if (!tracking || event.touches.length !== 1) return
@@ -2818,7 +2824,7 @@ function bindSwipeBack() {
     tracking.lastY = touch.clientY
     if (Math.abs(touch.clientY - tracking.startY) > 80) { tracking = null; return }
     const dx = touch.clientX - tracking.startX
-    const committed = tracking.edge === 'right' ? dx < -110 : dx > 110
+    const committed = dx >= 110 || dx <= -110
     if (!committed) return
     // 手势已明确向内滑动：先结算一次，避免等待 touchend 时被系统手势取消吞掉。
     finish(touch)
