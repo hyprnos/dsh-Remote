@@ -41,7 +41,9 @@ function makeRuntime({ modal = false, session = false } = {}) {
   const modalNode = { id: 'modal-notes', classList: classList(!modal) }
   const calls = []
   const document = {
-    body: { classList: classList(false, session ? 'in-session' : null) },
+    getElementById: () => null,
+    createElement: () => ({ id: '', className: '', textContent: '', setAttribute() {}, classList: classList(false) }),
+    body: { classList: classList(false, session ? 'in-session' : null), appendChild() {} },
     querySelector: sel => (sel === 'dialog[open]' ? null : null),
     querySelectorAll: sel => (sel === '.modal' ? [modalNode] : []),
   }
@@ -49,6 +51,8 @@ function makeRuntime({ modal = false, session = false } = {}) {
   const sandbox = {
     document,
     window,
+    setTimeout: () => 0,
+    clearTimeout: () => {},
     console,
     Math,
     Object,

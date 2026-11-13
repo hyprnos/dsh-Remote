@@ -2670,10 +2670,32 @@ async function closeSession() {
 /* 返回键统一入口：Android MainActivity 通过 window.__dshRemoteBack() 调用，
  * true 表示页面已处理（关弹窗/回上一级/退出会话），false 交由系统默认退出。
  * 不再自己做触摸手势，完全依赖系统返回键/返回手势。 */
+let backHintTimer = null
+/** 短暂提示：确认返回键已被页面收到（1.2 秒后消失）。 */
+function showBackHint(text) {
+  if (typeof document === 'undefined' || !document.body) return
+  let node = document.getElementById('back-key-hint')
+  if (!node) {
+    node = document.createElement('div')
+    node.id = 'back-key-hint'
+    node.className = 'back-key-hint'
+    node.setAttribute('role', 'status')
+    document.body.appendChild(node)
+  }
+  node.textContent = text || '返回'
+  node.classList.remove('hidden')
+  clearTimeout(backHintTimer)
+  backHintTimer = setTimeout(() => { node.classList.add('hidden') }, 1200)
+}
+
 function bindNativeBack() {
   if (typeof window !== 'undefined') {
     window.__dshRemoteBack = () => {
-      try { return handleAppBack() === true } catch { return false }
+      try {
+        const handled = handleAppBack() === true
+        showBackHint(handled ? '返回' : '退出')
+        return handled
+      } catch { return false }
     }
   }
   if (!CAP?.isNativePlatform?.()) return
@@ -2684,6 +2706,40 @@ function bindNativeBack() {
       if (!handleAppBack()) { try { CAP.Plugins?.App?.exitApp?.() } catch {} }
     })
   } catch {}
+  bindFallbackSwipe()
+}
+
+/** 兜底手势：屏幕任意位置向右长滑（≥90px、以水平为主）即返回；输入框内不参与。 */
+function bindFallbackSwipe() {
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return
+  if (bindFallbackSwipe.bound) return
+  bindFallbackSwipe.bound = true
+  let start = null
+  const settle = (x, y) => {
+    if (!start) return
+    const dx = (Number(x) || 0) - start.x
+    const dy = (Number(y) || 0) - start.y
+    const elapsed = Date.now() - start.at
+    start = null
+    if (dx >= 90 && Math.abs(dy) <= 50 && elapsed <= 900) {
+      const handled = handleAppBack() === true
+      showBackHint(handled ? '返回' : '退出')
+    }
+  }
+  document.addEventListener('touchstart', event => {
+    const touch = event.touches && event.touches.length === 1 ? event.touches[0] : null
+    const target = event.target
+    const inComposer = !!(target && typeof target.closest === 'function' && target.closest('#composer-wrap'))
+    start = touch && !inComposer ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null
+  }, { passive: true })
+  document.addEventListener('touchend', event => {
+    const touch = event.changedTouches && event.changedTouches[0]
+    settle(touch ? touch.clientX : NaN, touch ? touch.clientY : NaN)
+  }, { passive: true })
+  document.addEventListener('touchcancel', event => {
+    const touch = event.changedTouches && event.changedTouches[0]
+    settle(touch ? touch.clientX : NaN, touch ? touch.clientY : NaN)
+  }, { passive: true })
 }
 
 function handleAppBack() {
@@ -5357,7 +5413,7 @@ async function runFsUpload(up) {
   up.pauseRequested = false
   setFsButtons(true, false)
 
-  const uploadChunk = (params, blob) => new Promise((resolve, reject) => {
+  const uploadChunk = (params, body, retried) => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     up.xhr = xhr
     xhr.open('POST', fsApiUrl('/upload', params))
@@ -5380,8 +5436,21 @@ async function runFsUpload(up) {
       try { json = JSON.parse(xhr.responseText || '{}') } catch {}
       resolve({ status: xhr.status, json })
     }
-    xhr.onerror = () => { if (up.xhr === xhr) up.xhr = null; reject(new Error(t('fs.networkError'))) }
-    xhr.upload.onerror = () => { if (up.xhr === xhr) up.xhr = null; reject(new Error(t('fs.networkInterrupt'))) }
+    const failed = error => {
+      if (up.xhr === xhr) up.xhr = null
+      // 部分 WebView 无法直接把 File/Blob 流式发出（表现为 0 字节即 upload error）。
+      // 这种情况下改用 ArrayBuffer 重发一次，通常即可成功。
+      if (!retried && !(body instanceof ArrayBuffer) && up.offset === 0 && !up.cancelled) {
+        Promise.resolve()
+          .then(() => body.arrayBuffer())
+          .then(buffer => uploadChunk(params, buffer, true))
+          .then(resolve, reject)
+        return
+      }
+      reject(error)
+    }
+    xhr.onerror = () => failed(new Error(t('fs.networkError') + (xhr.status ? ' (HTTP ' + xhr.status + ')' : '')))
+    xhr.upload.onerror = () => failed(new Error(t('fs.networkInterrupt') + (xhr.status ? ' (HTTP ' + xhr.status + ')' : '')))
     xhr.onabort = () => {
       if (up.xhr === xhr) up.xhr = null
       const err = new Error(t(up.cancelled ? 'fs.cancelledErr' : 'fs.pausedErr'))
@@ -5441,7 +5510,8 @@ async function runFsUpload(up) {
       if (isLast) { params.finish = '1'; params.sha256 = hasher.hex() }
       if (overwrite) params.overwrite = '1'
       const startedAt = Date.now()
-      const r = await uploadChunk(params, blob)
+      // 用已读入的分块字节上传：部分 WebView 对 Blob 直传支持不好，会 0 字节即失败。
+      const r = await uploadChunk(params, chunkBytes.buffer.slice(chunkBytes.byteOffset, chunkBytes.byteOffset + chunkBytes.byteLength))
       if (!valid()) return
       const elapsed = Date.now() - startedAt
       up.chunkSize = elapsed > 15000 ? Math.max(65536, Math.floor(chunkSize / 2)) : elapsed < 2000 ? Math.min(FS_CHUNK_SIZE, chunkSize * 2) : chunkSize

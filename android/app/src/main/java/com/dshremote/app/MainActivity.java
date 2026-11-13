@@ -149,6 +149,18 @@ public class MainActivity extends BridgeActivity {
     handleBackPressed();
   }
 
+  @Override
+  public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+    // 最底层兜底：无论 ROM 用 onBackPressed 还是预测式返回，实体返回键都会走这里。
+    if (event.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK) {
+      if (event.getAction() == android.view.KeyEvent.ACTION_UP && !event.isCanceled()) {
+        handleBackPressed();
+      }
+      return true;
+    }
+    return super.dispatchKeyEvent(event);
+  }
+
   /** 返回键/系统手势统一交给页面导航；页面返回 true 表示已处理，否则按系统默认退出。 */
   private void handleBackPressed() {
     try {
