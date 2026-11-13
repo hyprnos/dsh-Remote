@@ -2667,171 +2667,59 @@ async function closeSession() {
   }
 }
 
-/* >>> 侧滑返回判定：tests/swipe-back.test.js 直接切片执行，勿依赖 DOM */
-// 返回手势：屏幕**任意位置**的长距离水平右滑（不依赖系统边缘手势是否把 touch 交给我们），
-// 也兼容从右边缘向左滑。要求以水平位移为主、竖直位移很小、动作够快，避免误触。
-function swipeBackIntent(gesture) {
-  const start = gesture || {}
-  const startX = Number(start.startX) || 0
-  const dx = (Number(start.endX) || 0) - startX
-  const dy = (Number(start.endY) || 0) - (Number(start.startY) || 0)
-  const elapsed = Number(start.elapsedMs)
-  const width = Number(start.width) || 0
-  const stillFromLeft = startX <= 32
-  // 左→右：任意起手点都可，但必须明显水平且位移够长
-  if (dx >= 90 && Math.abs(dy) <= 45 && (!Number.isFinite(elapsed) || elapsed <= 800)) return true
-  // 右→左：仅右侧边缘起手（避免列表里向左划误触）
-  if (width > 0 && startX >= width - 120 && dx <= -90 && Math.abs(dy) <= 45 && (!Number.isFinite(elapsed) || elapsed <= 800)) return true
-  // 边缘起手时放宽竖直容差，贴近系统手势的手感
-  if (stillFromLeft && dx >= 80 && Math.abs(dy) <= 80 && (!Number.isFinite(elapsed) || elapsed <= 900)) return true
-  return false
-}
-// 返回请求去重：原生 backButton 与 JS 侧滑可能对同一次手势各上报一次，
-// 300ms 内视为同一次；除此之外「滑一次就返回」，不再要求连击。
-function backRequestStep(previous, now) {
-  const at = Number(previous) || 0
-  const time = Number(now) || 0
-  if (at > 0 && time - at < 300) return { duplicate: true, previous: at, navigate: false }
-  return { duplicate: false, previous: time, navigate: true }
-}
-
-/* <<< 侧滑返回判定 */
-
-/* Android 手势返回/实体返回: 注册后系统不再直接杀 App, 由这里接管导航 */
+/* 返回键统一入口：Android MainActivity 通过 window.__dshRemoteBack() 调用，
+ * true 表示页面已处理（关弹窗/回上一级/退出会话），false 交由系统默认退出。
+ * 不再自己做触摸手势，完全依赖系统返回键/返回手势。 */
 function bindNativeBack() {
+  if (typeof window !== 'undefined') {
+    window.__dshRemoteBack = () => {
+      try { return handleAppBack() === true } catch { return false }
+    }
+  }
   if (!CAP?.isNativePlatform?.()) return
   try {
     CAP.Plugins?.App?.addListener?.('appStateChange',({isActive})=>{if(isActive)onResume()})
+    // 兜底：某些 Capacitor 版本仍会派发 backButton（原生已处理时不会重复导航）。
     CAP.Plugins?.App?.addListener?.('backButton', () => {
-      requestBack()
+      if (!handleAppBack()) { try { CAP.Plugins?.App?.exitApp?.() } catch {} }
     })
-    bindSwipeBack()
   } catch {}
 }
 
 function handleAppBack() {
-      if ($('composer-wrap')?.classList.contains('fs')) { setComposerFullscreen(false); return }
-      if (customSelectCurrent) { closeCustomSelect(); return }
-      if (groupDrawerOpen()) { closeGroupDrawer(); return }
-      if (typeof window !== 'undefined' && window.DshImagePreview?.closeSaveMenu?.()) return
-      if (typeof window !== 'undefined' && window.DshImagePreview?.isOpen?.()) { window.DshImagePreview.close(); return }
-      if (typeof window !== 'undefined' && window.DshExtensions?.closeShortcuts(true)) return
-      if (typeof window !== 'undefined' && window.DshFileInbox?.close()) return
+      if ($('composer-wrap')?.classList.contains('fs')) { setComposerFullscreen(false); return true }
+      if (customSelectCurrent) { closeCustomSelect(); return true }
+      if (groupDrawerOpen()) { closeGroupDrawer(); return true }
+      if (typeof window !== 'undefined' && window.DshImagePreview?.closeSaveMenu?.()) return true
+      if (typeof window !== 'undefined' && window.DshImagePreview?.isOpen?.()) { window.DshImagePreview.close(); return true }
+      if (typeof window !== 'undefined' && window.DshExtensions?.closeShortcuts(true)) return true
+      if (typeof window !== 'undefined' && window.DshFileInbox?.close()) return true
       // Plain popovers are not .modal or <dialog>; without this the Android back key
       // skips them and closes the conversation (or the app) instead.
       const imageMenu = $('composer-image-menu')
-      if (typeof imageMenu?.classList?.contains === 'function' && typeof imageMenu.classList.add === 'function' && !imageMenu.classList.contains('hidden')) { imageMenu.classList.add('hidden'); return }
+      if (typeof imageMenu?.classList?.contains === 'function' && typeof imageMenu.classList.add === 'function' && !imageMenu.classList.contains('hidden')) { imageMenu.classList.add('hidden'); return true }
       const composerMenu = $('composer-menu')
       const canHideComposerMenu = typeof hideComposerMenu === 'function' || typeof composerMenu?.classList?.add === 'function'
-      if (canHideComposerMenu && typeof composerMenu?.classList?.contains === 'function' && !composerMenu.classList.contains('hidden')) { if (typeof hideComposerMenu === 'function') hideComposerMenu(); else composerMenu.classList.add('hidden'); return }
-      if (typeof window !== 'undefined' && typeof document.querySelector === 'function' && document.querySelector('.doctor-overlay:not(.hidden)') && typeof window.DshDoctor?.close === 'function') { window.DshDoctor.close(); return }
+      if (canHideComposerMenu && typeof composerMenu?.classList?.contains === 'function' && !composerMenu.classList.contains('hidden')) { if (typeof hideComposerMenu === 'function') hideComposerMenu(); else composerMenu.classList.add('hidden'); return true }
+      if (typeof window !== 'undefined' && typeof document.querySelector === 'function' && document.querySelector('.doctor-overlay:not(.hidden)') && typeof window.DshDoctor?.close === 'function') { window.DshDoctor.close(); return true }
       const dialog = document.querySelector('dialog[open]')
-      if (dialog) { dialog.close(); return }
+      if (dialog) { dialog.close(); return true }
       const openModal = [...document.querySelectorAll('.modal')].find(m => !m.classList.contains('hidden'))
-      if (openModal) { if (openModal.id === 'modal-notes') closeNotesModal(); else if (openModal.id === 'modal-archive') closeArchiveConfirm(); else if (openModal.id === 'modal-rename') closeRenameSession(); else if (openModal.id === 'modal-app-version-warning') closeAppVersionWarning(false); else if (openModal.id === 'modal-scan-live') closeLiveScan(''); else if (openModal.id === 'modal-announcement') { if (state.announcementItems.some(item => item.force)) return; closeAnnouncement(false); return } else openModal.classList.add('hidden'); return }   // 先关弹窗
+      if (openModal) { if (openModal.id === 'modal-notes') closeNotesModal(); else if (openModal.id === 'modal-archive') closeArchiveConfirm(); else if (openModal.id === 'modal-rename') closeRenameSession(); else if (openModal.id === 'modal-app-version-warning') closeAppVersionWarning(false); else if (openModal.id === 'modal-scan-live') closeLiveScan(''); else if (openModal.id === 'modal-announcement') { if (state.announcementItems.some(item => item.force)) return true; closeAnnouncement(false); return true } else openModal.classList.add('hidden'); return true }   // 先关弹窗
       if (!$('view-settings').classList.contains('hidden')) {
         if ($('settings-home').classList.contains('hidden')) showSettingsHome()
         else showView('view-home')
-        return
+        return true
       }
-      if (!$('view-plugins').classList.contains('hidden')) { showView('view-settings'); return }
-      if (document.body.classList.contains('in-session')) { void closeSession(); return } // 会话页 → 回主页
+      if (!$('view-plugins').classList.contains('hidden')) { showView('view-settings'); return true }
+      if (document.body.classList.contains('in-session')) { void closeSession(); return true } // 会话页 → 回主页
       if (!$('view-files').classList.contains('hidden')) {           // 文件页 → 上级目录 → 主页
-        if (state.fs.path && state.fs.initial && state.fs.path !== state.fs.initial) { fsUp(); return }
-        showView('view-home'); return
+        if (state.fs.path && state.fs.initial && state.fs.path !== state.fs.initial) { fsUp(); return true }
+        showView('view-home'); return true
       }
-      if ($('view-home').classList.contains('hidden')) { showView('view-home'); return }
-      try { CAP.Plugins?.App?.exitApp?.() } catch {}                  // 主页再返回 → 退出(与系统一致)
-}
+      if ($('view-home').classList.contains('hidden')) { showView('view-home'); return true }
+  return false   // 主页再返回：交给原生系统默认行为（退出）
 
-// 统一的「返回请求」入口：原生返回键/手势与 JS 侧滑都走这里，2 次连击才导航。
-let backRequestAt = 0
-let swipeBackBound = false
-function requestBack() {
-  const step = backRequestStep(backRequestAt, Date.now())
-  if (step.duplicate) return
-  backRequestAt = step.previous
-  // 短暂提示：确认手势/返回键被识别（1.4 秒后自动消失）。
-  try { backCounterHint('返回') } catch {}
-  runBackNavigation()
-}
-
-// 顶栏下方的临时计数提示（1.4 秒后消失），用于侧滑返回的连击反馈与排障。
-let backHintTimer = null
-function backCounterHint(text) {
-  if (typeof document === 'undefined') return
-  let node = document.getElementById('back-gesture-hint')
-  if (!node) {
-    node = document.createElement('div')
-    node.id = 'back-gesture-hint'
-    node.className = 'back-gesture-hint'
-    node.setAttribute('role', 'status')
-    node.setAttribute('aria-live', 'polite')
-    document.body.appendChild(node)
-  }
-  node.textContent = '返回 ' + text
-  node.classList.remove('hidden')
-  clearTimeout(backHintTimer)
-  backHintTimer = setTimeout(() => { node.classList.add('hidden') }, 1400)
-}
-
-// 导航执行加兜底：任何一步抛错或没命中分支时，只要还在会话里就退出会话。
-function runBackNavigation() {
-  try {
-    handleAppBack()
-  } catch (error) {
-    try { console.warn('back navigation failed', error) } catch {}
-    if (state.current) void closeSession()
-  }
-}
-
-/* 自实现左边缘右滑返回：部分 ROM 的 WebView 不会把系统边缘手势转成 backButton，
- * 这里按边缘手势识别后走同一套返回导航。右滑一次 = 上一级（会话页直接回会话列表），
- * 连续滑两次等同于连按两次返回。 */
-function bindSwipeBack() {
-  if (typeof document === 'undefined' || swipeBackBound) return
-  swipeBackBound = true
-  let tracking = null
-  const viewportWidth = () => (typeof window !== 'undefined' && Number(window.innerWidth)) || 0
-  const finish = touch => {
-    if (!tracking) return
-    // 系统手势接管时 touchend/touchcancel 可能没有坐标，回退到最后一次移动位置。
-    const endX = touch ? touch.clientX : (Number.isFinite(tracking.lastX) ? tracking.lastX : tracking.startX)
-    const endY = touch ? touch.clientY : (Number.isFinite(tracking.lastY) ? tracking.lastY : tracking.startY)
-    const gesture = {
-      startX: tracking.startX, startY: tracking.startY, width: tracking.width,
-      endX, endY,
-      elapsedMs: Date.now() - tracking.startedAt,
-    }
-    tracking = null
-    if (!swipeBackIntent(gesture)) return
-    requestBack()
-  }
-  document.addEventListener('touchstart', event => {
-    if (event.touches.length !== 1) { tracking = null; return }
-    const touch = event.touches[0]
-    const width = viewportWidth()
-    // 输入框内的滑动交给文本选择，不参与返回手势
-    const target = event.target
-    const inComposer = !!(target && typeof target.closest === 'function' && target.closest('#composer-wrap'))
-    if (inComposer) { tracking = null; return }
-    tracking = { startX: touch.clientX, startY: touch.clientY, startedAt: Date.now(), width }
-  }, { passive: true })
-  document.addEventListener('touchmove', event => {
-    if (!tracking || event.touches.length !== 1) return
-    const touch = event.touches[0]
-    tracking.lastX = touch.clientX
-    tracking.lastY = touch.clientY
-    if (Math.abs(touch.clientY - tracking.startY) > 80) { tracking = null; return }
-    const dx = touch.clientX - tracking.startX
-    const committed = dx >= 110 || dx <= -110
-    if (!committed) return
-    // 手势已明确向内滑动：先结算一次，避免等待 touchend 时被系统手势取消吞掉。
-    finish(touch)
-  }, { passive: true })
-  document.addEventListener('touchend', event => finish((event.changedTouches && event.changedTouches[0]) || null), { passive: true })
-  // 系统手势接管 WebView 时会发 touchcancel；此时按已移动距离结算，保证「滑一次」就生效。
-  document.addEventListener('touchcancel', event => finish((event.changedTouches && event.changedTouches[0]) || null), { passive: true })
 }
 
 function renderSessionTitle() {

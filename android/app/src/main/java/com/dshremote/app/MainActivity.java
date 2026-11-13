@@ -132,12 +132,52 @@ public class MainActivity extends BridgeActivity {
     } catch (Throwable ignored) {}
   }
 
+  private void installBackDispatcher() {
+    // Capacitor 在清单里开了 enableOnBackInvokedCallback="true"，
+    // Android 13+ 就不再调用 onBackPressed()，必须自己注册 OnBackInvokedCallback，
+    // 否则返回键/系统返回手势完全没有响应（这正是之前"返回键没反应"的原因）。
+    if (Build.VERSION.SDK_INT >= 33) {
+      try {
+        getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+            android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::handleBackPressed);
+      } catch (Throwable ignored) {}
+    }
+  }
+
+  @Override
+  public void onBackPressed() {
+    handleBackPressed();
+  }
+
+  /** 返回键/系统手势统一交给页面导航；页面返回 true 表示已处理，否则按系统默认退出。 */
+  private void handleBackPressed() {
+    try {
+      if (bridge == null || bridge.getWebView() == null) { exitFromBack(); return; }
+      bridge.getWebView().evaluateJavascript(
+          "(function(){try{return window.__dshRemoteBack?window.__dshRemoteBack()===true:false}catch(e){return false}})()",
+          value -> {
+            if (!"true".equals(value)) exitFromBack();
+          });
+    } catch (Throwable error) {
+      exitFromBack();
+    }
+  }
+
+  private void exitFromBack() {
+    try {
+      super.onBackPressed();
+    } catch (Throwable error) {
+      try { finish(); } catch (Throwable ignored) {}
+    }
+  }
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     // Warm the paired host before the WebView starts loading, so the first screen's
     // requests can take ready E2EE channels instead of waiting for a handshake.
     try { E2eeBridge.warmLast(getApplicationContext()); } catch (Throwable ignored) {}
     super.onCreate(savedInstanceState);
+    installBackDispatcher();
     new Thread(() -> EncryptedDownloads.cleanup(getApplicationContext()), "DSH-download-cleanup").start();
     rememberPendingNavigation(getIntent());
     // DSH Remote 走局域网 http 网关: 显式允许混合内容(https 壳加载 http API)
