@@ -164,16 +164,22 @@ public class MainActivity extends BridgeActivity {
   /** 返回键/系统手势统一交给页面导航；页面返回 true 表示已处理，否则按系统默认退出。 */
   private void handleBackPressed() {
     try {
+      // 诊断用 Toast：不依赖 WebView，能直接证明返回键是否到达原生侧。
+      try { Toast.makeText(this, "返回键已收到", Toast.LENGTH_SHORT).show(); } catch (Throwable ignored) {}
       if (bridge == null || bridge.getWebView() == null) { exitFromBack(); return; }
       bridge.getWebView().evaluateJavascript(
-          "(function(){try{return window.__dshRemoteBack?window.__dshRemoteBack()===true:false}catch(e){return false}})()",
+          "(function(){try{return window.__dshRemoteBack?window.__dshRemoteBack()===true:'no-bridge'}catch(e){return 'error:'+(e&&e.message)}})()",
           value -> {
+            lastBackResult = String.valueOf(value);
             if (!"true".equals(value)) exitFromBack();
           });
     } catch (Throwable error) {
+      lastBackResult = "throw:" + error.getMessage();
       exitFromBack();
     }
   }
+
+  private volatile String lastBackResult = "none";
 
   private void exitFromBack() {
     try {
@@ -251,6 +257,9 @@ public class MainActivity extends BridgeActivity {
     private final java.util.concurrent.atomic.AtomicInteger ids = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.ExecutorService pool =
         java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    @JavascriptInterface
+    public String lastBack() { return lastBackResult; }
 
     @JavascriptInterface
     public String post(String json) {
