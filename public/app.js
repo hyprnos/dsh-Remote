@@ -5406,12 +5406,41 @@ async function runFsUpload(up) {
   const connection = up.connection ||= captureConnection()
   const valid = () => connection.valid() && state.fs.upload === up && !up.cancelled
   if (!valid()) return
+  const useNativeUpload = !!(CAP?.isNativePlatform?.() && globalThis.NativeUpload && typeof globalThis.NativeUpload.post === 'function')
   up.controller = new AbortController()
   up.active = true
   up.cancelled = false
   up.paused = false
   up.pauseRequested = false
   setFsButtons(true, false)
+
+  // App 内优先走原生上传（WebView 的 XHR/fetch 在部分机型+网络上会 0 字节失败）。
+  const nativeUploadChunk = (params, bytes) => new Promise((resolve, reject) => {
+    const bridge = globalThis.NativeUpload
+    if (!bridge || typeof bridge.post !== 'function') { reject(new Error('native-upload-unavailable')); return }
+    const headers = {
+      authorization: 'Bearer ' + state.token,
+      'x-dsh-remote-client': 'app',
+    }
+    if (CLIENT_ID) headers['x-dsh-remote-client-id'] = CLIENT_ID
+    if (params.offset != null) headers['Upload-Offset'] = String(params.offset)
+    if (params.size != null) headers['Upload-Length'] = String(params.size)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+    const requestId = bridge.post(JSON.stringify({
+      url: fsApiUrl('/upload', params),
+      headers,
+      bodyBase64: btoa(binary),
+      timeoutMs: window.DshNetwork?.profile().weak ? 180000 : 120000,
+    }))
+    pendingUploads.set(requestId, { resolve, reject })
+    up.nativeRequestId = requestId
+    setTimeout(() => {
+      if (!pendingUploads.has(requestId)) return
+      pendingUploads.delete(requestId)
+      reject(new Error('上传等待超时，可查询进度后继续'))
+    }, (window.DshNetwork?.profile().weak ? 180000 : 90000) + 5000)
+  })
 
   const uploadChunk = (params, body, retried) => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -5495,7 +5524,7 @@ async function runFsUpload(up) {
 
     while (up.offset < up.size) {
       if (!valid()) return
-      const chunkSize = up.chunkSize || (window.DshNetwork?.profile().weak ? 256 * 1024 : FS_CHUNK_SIZE)
+      const chunkSize = up.chunkSize || (CAP?.isNativePlatform?.() ? (window.DshNetwork?.profile().weak ? 128 * 1024 : 256 * 1024) : (window.DshNetwork?.profile().weak ? 256 * 1024 : FS_CHUNK_SIZE))
       const end = Math.min(up.offset + chunkSize, up.size)
       const blob = up.file.slice(up.offset, end)
       const before = hasher.clone()
@@ -5510,8 +5539,21 @@ async function runFsUpload(up) {
       if (isLast) { params.finish = '1'; params.sha256 = hasher.hex() }
       if (overwrite) params.overwrite = '1'
       const startedAt = Date.now()
-      // 用已读入的分块字节上传：部分 WebView 对 Blob 直传支持不好，会 0 字节即失败。
-      const r = await uploadChunk(params, chunkBytes.buffer.slice(chunkBytes.byteOffset, chunkBytes.byteOffset + chunkBytes.byteLength))
+      // App 内优先用原生通道发送（WebView 的 XHR/fetch 在这些机型上会 0 字节失败），
+      // 失败再退回页面内的 XHR，并对同一块最多重试 3 次（逐次减半块大小）。
+      let r = null
+      let attemptError = null
+      for (let attempt = 0; attempt < 3 && r === null; attempt++) {
+        try {
+          if (useNativeUpload) r = await nativeUploadChunk(params, chunkBytes)
+          else r = await uploadChunk(params, chunkBytes.buffer.slice(chunkBytes.byteOffset, chunkBytes.byteOffset + chunkBytes.byteLength))
+        } catch (error) {
+          attemptError = error
+          if (!valid()) throw error
+          if (attempt < 2) up.chunkSize = Math.max(32 * 1024, Math.floor(chunkSize / (attempt + 2)))
+        }
+      }
+      if (r === null) throw attemptError || new Error(t('fs.networkInterrupt'))
       if (!valid()) return
       const elapsed = Date.now() - startedAt
       up.chunkSize = elapsed > 15000 ? Math.max(65536, Math.floor(chunkSize / 2)) : elapsed < 2000 ? Math.min(FS_CHUNK_SIZE, chunkSize * 2) : chunkSize
@@ -6408,6 +6450,23 @@ async function sha256Hex(buffer) {
     return hasher.hex()
   }
   throw new Error('当前页面无法计算 SHA-256，请改用 App 或 https 地址打开')
+}
+
+const pendingUploads = new Map()
+// 原生上传完成后由 Java 通过 evaluateJavascript 回调这里。
+globalThis.__dshUploadResult = payload => {
+  let data = null
+  try { data = JSON.parse(payload) } catch { return }
+  const pending = pendingUploads.get(data && data.id)
+  if (!pending) return
+  pendingUploads.delete(data.id)
+  if (data.ok) {
+    let json = {}
+    try { json = JSON.parse(data.body || '{}') } catch {}
+    pending.resolve({ status: data.status, json })
+  } else {
+    pending.reject(new Error(t('fs.networkInterrupt') + (data.error ? ' (' + data.error + ')' : '')))
+  }
 }
 
 let updateDownloadBusy = false

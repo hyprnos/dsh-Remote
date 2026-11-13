@@ -211,6 +211,9 @@ public class MainActivity extends BridgeActivity {
       lanDiscovery = new LanDiscovery(this);
       bridge.getWebView().addJavascriptInterface(lanDiscovery, "NativeLan");
       bridge.getWebView().addJavascriptInterface(E2eeBridge.get(this), "NativeE2ee");
+      // 上传兜底：WebView 的 XHR/fetch 在部分机型/网络下会在 0 字节处失败，
+      // 这里用原生 HttpURLConnection 直接发送分块，成功与否回传给页面。
+      bridge.getWebView().addJavascriptInterface(new UploadBridge(), "NativeUpload");
     } catch (Throwable ignored) {
     }
   }
@@ -241,6 +244,81 @@ public class MainActivity extends BridgeActivity {
   @Override public void onDestroy() {
     if (lanDiscovery != null) lanDiscovery.destroy();
     super.onDestroy();
+  }
+
+  /** 原生分块上传：参数是 JSON {url, headers:{...}, bodyBase64, timeoutMs}，返回请求 id。 */
+  private class UploadBridge {
+    private final java.util.concurrent.atomic.AtomicInteger ids = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.ExecutorService pool =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    @JavascriptInterface
+    public String post(String json) {
+      final String id = "u" + ids.incrementAndGet();
+      final JSONObject args;
+      try {
+        args = new JSONObject(json == null ? "{}" : json);
+      } catch (Exception error) {
+        deliver(id, false, 0, "", "bad-args");
+        return id;
+      }
+      pool.execute(() -> {
+        HttpURLConnection conn = null;
+        try {
+          URL url = new URL(args.getString("url"));
+          byte[] body = android.util.Base64.decode(args.optString("bodyBase64", ""), android.util.Base64.NO_WRAP);
+          int timeout = Math.max(5000, args.optInt("timeoutMs", 120000));
+          conn = (HttpURLConnection) url.openConnection();
+          conn.setRequestMethod("POST");
+          conn.setConnectTimeout(15000);
+          conn.setReadTimeout(timeout);
+          conn.setDoOutput(true);
+          conn.setFixedLengthStreamingMode(body.length);
+          JSONObject headers = args.optJSONObject("headers");
+          if (headers != null) {
+            java.util.Iterator<String> keys = headers.keys();
+            while (keys.hasNext()) {
+              String key = keys.next();
+              conn.setRequestProperty(key, headers.optString(key, ""));
+            }
+          }
+          try (java.io.OutputStream out = conn.getOutputStream()) {
+            out.write(body);
+          }
+          int status = conn.getResponseCode();
+          java.io.InputStream in = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+          StringBuilder text = new StringBuilder();
+          if (in != null) {
+            try (java.io.InputStream stream = in) {
+              byte[] buffer = new byte[8192];
+              int read;
+              while ((read = stream.read(buffer)) > 0) text.append(new String(buffer, 0, read, java.nio.charset.StandardCharsets.UTF_8));
+            }
+          }
+          deliver(id, true, status, text.toString(), "");
+        } catch (Throwable error) {
+          deliver(id, false, 0, "", String.valueOf(error.getMessage()));
+        } finally {
+          if (conn != null) conn.disconnect();
+        }
+      });
+      return id;
+    }
+
+    private void deliver(String id, boolean ok, int status, String body, String error) {
+      try {
+        JSONObject payload = new JSONObject();
+        payload.put("id", id);
+        payload.put("ok", ok);
+        payload.put("status", status);
+        payload.put("body", body);
+        payload.put("error", error);
+        String js = "window.__dshUploadResult&&window.__dshUploadResult(" + JSONObject.quote(payload.toString()) + ")";
+        main.post(() -> {
+          try { bridge.getWebView().evaluateJavascript(js, null); } catch (Throwable ignored) {}
+        });
+      } catch (Exception ignored) {}
+    }
   }
 
   private class UpdateBridge {

@@ -1,6 +1,6 @@
 {
   "name": "@hyprnos/dsh-remote-plugin",
-  "version": "0.8.30",
+  "version": "0.8.31",
   "description": "DSH Remote（个人分支）bundle 插件：手机连接入口、首次连接提示与浏览器管理控制台；内置网关自动启停，支持手机远程会话、审批、文件互传、语音输入和设备管理。",
   "displayName": "DSH Remote",
   "type": "module",
