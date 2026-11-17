@@ -1880,8 +1880,24 @@ function scheduleRefresh() {
   state.refreshTimer = setTimeout(() => { state.refreshTimer = null; if (connection.valid()) void refreshAll() }, 700)
 }
 
+const LAST_SESSION_KEY = 'lastSessionV1'
+let lastSessionRestoreTried = false
+
+/** 页面重建后恢复上次打开的会话（同主机、且会话仍在列表里）。 */
+function restoreLastSessionOnce() {
+  if (lastSessionRestoreTried || state.current) return
+  let saved = null
+  try { saved = JSON.parse(LS.get(LAST_SESSION_KEY, 'null') || 'null') } catch {}
+  if (!saved || !saved.sessionId) return
+  if (saved.server && state.server && saved.server !== state.server) { lastSessionRestoreTried = true; return }
+  if (!state.sessions.some(row => row.sessionId === saved.sessionId)) { lastSessionRestoreTried = true; return }
+  lastSessionRestoreTried = true
+  void openSession(saved.sessionId)
+}
+
 async function refreshAll() {
   await refreshSessions()
+  try { restoreLastSessionOnce() } catch {}
   if (state.current) { renderSessionCards(); renderSessionSub(); updateCancelBtn(); updateSessionStatus() }
   renderPending(); renderQueue(); renderJobs(); updateConn()
 }
@@ -2583,6 +2599,9 @@ async function openSession(id) {
   }
   cancelHistoryLoad()
   state.current = id
+  // 记住最近打开的会话：WebView 被系统回收或从外部浏览器返回导致页面重建时，
+  // 启动后据此恢复，而不是莫名其妙掉回会话列表。
+  try { LS.set(LAST_SESSION_KEY, JSON.stringify({ server: state.server, sessionId: id })) } catch {}
   setSessionRecovery('loading')
   state.history = emptyHistory()
   const openingHistory=state.history, openingConnection=captureConnection()
@@ -2642,6 +2661,7 @@ async function closeSession() {
     return openSession(parentId)
   }
   const wasLoading = state.history.loading
+  try { LS.del(LAST_SESSION_KEY) } catch {}
   cancelHistoryLoad()
   const connection=captureConnection(),discard=!wasLoading&&shouldDiscardEmptySession(sessionId)
   state.current = null
